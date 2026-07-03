@@ -317,6 +317,46 @@ public class DeepSeekChatBridge {
             "    } catch (_se) { Android.log('[DEBUG-STRUCT] 分析异常: ' + _se.message); }\n" +
             "  }\n" +
             "\n" +
+            "  // 全局 JSON-RPC 扫描：直接从整个文档提取完整的 JSON-RPC 内容\n" +
+            "  // 用于应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
+            "  function extractJsonRpcFromDocument() {\n" +
+            "    try {\n" +
+            "      var bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';\n" +
+            "      if (!bodyText || bodyText.indexOf('\"jsonrpc\"') === -1) return null;\n" +
+            "      var searchKey = '{\"jsonrpc\"';\n" +
+            "      var idx = bodyText.indexOf(searchKey);\n" +
+            "      while (idx !== -1) {\n" +
+            "        var inStr = false; var quoteChar = ''; var esc = false;\n" +
+            "        var depth = 0; var end = -1;\n" +
+            "        for (var j = idx; j < bodyText.length; j++) {\n" +
+            "          var ch = bodyText.charAt(j);\n" +
+            "          if (inStr) {\n" +
+            "            if (esc) { esc = false; continue; }\n" +
+            "            if (ch === '\\\\') { esc = true; continue; }\n" +
+            "            if (ch === quoteChar) { inStr = false; continue; }\n" +
+            "            continue;\n" +
+            "          }\n" +
+            "          if (ch === '\"') { inStr = true; quoteChar = ch; continue; }\n" +
+            "          if (ch === '{') depth++;\n" +
+            "          else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }\n" +
+            "        }\n" +
+            "        if (end !== -1) {\n" +
+            "          var extracted = bodyText.substring(idx, end + 1);\n" +
+            "          if (extracted.indexOf('\"method\"') !== -1 && extracted.indexOf('\"tools/call\"') !== -1) {\n" +
+            "            try {\n" +
+            "              JSON.parse(extracted);\n" +
+            "              return extracted;\n" +
+            "            } catch(e) { /* JSON 无效，继续查找下一个 */ }\n" +
+            "          }\n" +
+            "        }\n" +
+            "        idx = bodyText.indexOf(searchKey, idx + 1);\n" +
+            "      }\n" +
+            "    } catch(_e) {\n" +
+            "      Android.log('[DEBUG][' + __rid + '] extractJsonRpcFromDocument 异常: ' + _e.message);\n" +
+            "    }\n" +
+            "    return null;\n" +
+            "  }\n" +
+            "\n" +
             "  function getAssistantReply(el) {\n" +
             "    if (!el) return null;\n" +
             "    var html = (el.innerHTML || '').trim();\n" +
@@ -783,6 +823,15 @@ public class DeepSeekChatBridge {
             "    // 直接取最后一条AI消息，始终跟踪最新内容\n" +
             "    var latestEl = list[list.length - 1];\n" +
             "    var reply = getAssistantReply(latestEl);\n" +
+            "    // 全局 JSON-RPC 扫描：如果 reply 不完整或为空，尝试从整个文档提取完整 JSON\n" +
+            "    // 应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
+            "    if (!reply || reply.indexOf('\"method\"') === -1 || reply.indexOf('\"tools/call\"') === -1) {\n" +
+            "      var globalJson = extractJsonRpcFromDocument();\n" +
+            "      if (globalJson) {\n" +
+            "        Android.log('[DEBUG][' + __rid + '] 全局扫描提取到完整JSON-RPC，长度=' + globalJson.length + '，覆盖reply');\n" +
+            "        reply = globalJson;\n" +
+            "      }\n" +
+            "    }\n" +
             "    // 强制扫描 <pre> 代码块：当存在 <pre> 标签时，提取纯净的 JSON 替换混合内容\n" +
             "    var preEls = latestEl.querySelectorAll('pre');\n" +
             "    if (preEls && preEls.length > 0) {\n" +
