@@ -1,87 +1,222 @@
-# Agent工具箱 - MCP服务端
+# Agent工具箱 - Android MCP 服务端
 
-基于 **AIDE Pro** 开发的安卓端 MCP（Model Context Protocol）服务端应用，完全遵循 JSON-RPC 2.0 协议规范，可与网页端 Agent 客户端无缝对接。内置 DeepSeek 网页版集成，一键调用本地工具。
-
----
-
-## 功能特性
-
-- ✅ 完整实现 MCP 协议标准（JSON-RPC 2.0 over HTTP）
-- ✅ 内置 4 款实用工具：
-  - `math_calculator` - 高精度数学计算（基于栈的表达式解析）
-  - `http_request` - 通用 HTTP 请求（支持 GET/POST/PUT/DELETE）
-  - `file_read` - 文件读取（应用内部存储）
-  - `file_write` - 文件写入（支持覆盖或追加）
-- ✅ 可视化服务控制界面 + 实时请求日志
-- ✅ DeepSeek 网页版集成（登录检测、新会话、刷新）
-- ✅ 页面源码提取功能（evaluateJavascript 直接返回，无 alert 依赖）
-- ✅ MCP DOM 监听脚本（自动检测页面中的工具调用）
-- ✅ 支持跨域访问（CORS）
-- ✅ 纯 Java 实现，无第三方依赖
+基于 **AIDE Pro** 开发的安卓端 MCP（Model Context Protocol）服务端应用，完全遵循 JSON-RPC 2.0 协议规范。内置 **Python 3.14.6** 嵌入式运行时、**Lua 引擎**、**内存修改引擎**，通过 DeepSeek 网页版集成为 AI 提供本地工具调用能力。
 
 ---
 
-## 快速开始
+## 核心特性
 
-### 1. 导入到 AIDE Pro
+### 协议与通信
+- 完整实现 MCP 协议（JSON-RPC 2.0 over HTTP）
+- 内置 HTTP 服务器，支持跨域访问（CORS）
+- DeepSeek 网页版集成，通过 JS Bridge 自动监听工具调用
+- 流式传输工具调用 JSON，自动禁用心跳避免中断
 
-**方法一：直接打开项目**
-1. 将整个项目文件夹复制到手机存储
-2. 打开 AIDE Pro → 选择「打开项目」→ 选择该文件夹
+### 内嵌 Python 3.14.6 (JNI 模式)
+- 使用 Python 官方 `python-3.14.6-aarch64-linux-android.tar.gz` 构建
+- 通过 JNI 嵌入 `libpython3.14.so`，无需 Termux 或外部 Python
+- 完整标准库（含 `lib-dynload/*.so` 扩展模块）
+- 支持 `asyncio`、`ssl`、`sqlite3`、`hashlib` 等扩展模块
+- 信号保护机制：`Py_Initialize` 崩溃不杀进程
+- GIL 安全管理：`PyEval_SaveThread` + `PyGILState_Ensure/Release`
 
-**方法二：手动创建**
-1. 打开 AIDE Pro，新建 Android App 空白项目
-2. 应用名称：`Agent工具箱`，包名：`com.example.agenttoolbox`
-3. 最低 SDK：API 21 (Android 5.0)
-4. 将本仓库的文件按目录结构复制到对应位置
+### 工具集 (17 个内置工具)
 
-### 2. 启动 MCP 服务
-
-1. 安装并运行应用
-2. 点击 **「启动MCP服务」** 按钮
-3. 记录显示的监听地址（如 `http://192.168.1.100:8080`）
-4. 在同一局域网的浏览器访问该地址，可打开测试客户端
-
-### 3. 使用 DeepSeek 集成
-
-1. 点击 **「打开 DeepSeek 助手」**
-2. 登录你的 DeepSeek 账号
-3. 顶栏「提取源码」可复制当前页面 HTML 到剪贴板
+| 分类 | 工具名 | 说明 |
+|------|--------|------|
+| **Python** | `python` | 内嵌 Python 3.14 代码执行 |
+| **Shell** | `shell` | Shell 命令执行 |
+| | `cmd` | 命令执行（无 root） |
+| | `sh` | sh 命令执行 |
+| **文件** | `file_read` | 文件读取（支持行范围） |
+| | `file_write` | 文件写入（replace/insert/append） |
+| | `file_list` | 目录列表 |
+| **网络** | `http_request` | HTTP 请求（GET/POST/PUT/DELETE） |
+| | `web` | 网页内容获取 |
+| **数学** | `math_calculator` | 高精度数学计算 |
+| **Lua** | `lua` | Lua 脚本执行（GameGuardian API） |
+| **GM** | `gm_root_status` | Root 状态检查 |
+| | `gm_process_list` | 进程列表 |
+| | `gm_attach_process` | 附加进程 |
+| | `gm_memory_search` | 内存搜索 |
+| | `gm_memory_read` | 内存读取 |
+| | `gm_memory_write` | 内存写入 |
+| | `gm_memory_freeze` | 内存冻结 |
+| | `gm_aob_search` | AOB 特征码搜索 |
 
 ---
 
 ## 项目结构
 
 ```
-AgentToolbox/
-├── AndroidManifest.xml              # 应用清单（权限 + 2 个 Activity）
+agent-toolbox/
+├── AndroidManifest.xml                  # 应用清单
+├── build.gradle                         # Gradle 构建（arm64-v8a）
 ├── assets/
-│   └── test_client.html             # MCP 测试客户端（HTTP 服务返回）
+│   ├── python/
+│   │   ├── include/                     # Python 3.14 C 头文件
+│   │   └── stdlib/                      # Python 标准库
+│   │       ├── lib-dynload/             # 编译的 .so 扩展模块
+│   │       ├── encodings/               # 编码模块
+│   │       ├── asyncio/                 # 异步 IO
+│   │       └── ...                      # os.py, json/, re/ 等
+│   └── test_client.html                 # MCP 测试客户端
+├── libs/
+│   └── arm64-v8a/
+│       ├── libpython3.14.so             # Python 3.14.6 共享库
+│       ├── libpython_bridge.so          # JNI 桥接层
+│       ├── libcrypto.so                 # OpenSSL 加密库
+│       ├── libssl.so                    # OpenSSL SSL 库
+│       └── libsqlite3.so                # SQLite 库
 ├── res/
 │   ├── layout/
-│   │   ├── activity_main.xml        # 主界面（服务控制 + 日志）
-│   │   └── activity_deepseek.xml    # DeepSeek 界面（WebView + 工具栏）
+│   │   ├── activity_main.xml            # 主界面
+│   │   └── activity_deepseek.xml        # DeepSeek WebView 界面
 │   └── values/
-│       └── strings.xml              # 应用资源
-├── proguard-rules.pro               # 混淆规则
-├── project.properties               # AIDE 项目配置
+│       └── strings.xml
 └── src/
+    ├── main/
+    │   ├── c/
+    │   │   ├── CMakeLists.txt           # NDK CMake 配置
+    │   │   ├── python_bridge.c          # JNI Python 桥接层
+    │   │   └── include/                 # Python/OpenSSL/SQLite 头文件
+    │   └── ...
     └── com/example/agenttoolbox/
-        ├── MainActivity.java        # 主界面（服务控制）
-        ├── DeepSeekActivity.java    # DeepSeek WebView 集成
-        ├── JavaScriptBridge.java    # JS <-> Java 桥（工具调用）
+        ├── MainActivity.java            # 主界面（服务控制 + 日志）
+        ├── DeepSeekActivity.java         # DeepSeek WebView 集成
+        ├── DeepSeekChatBridge.java       # DeepSeek 聊天桥接
+        ├── JavaScriptBridge.java         # JS <-> Java 工具调用桥
+        ├── McpForegroundService.java     # MCP 前台服务
         ├── mcp/
-        │   ├── McpServer.java       # MCP HTTP 服务端（核心）
-        │   ├── JsonRpcRequest.java  # JSON-RPC 请求解析
-        │   └── JsonRpcResponse.java # JSON-RPC 响应构造
-        └── tools/
-            ├── Tool.java            # 工具接口
-            ├── ToolManager.java     # 工具管理器
-            ├── MathCalculatorTool.java
-            ├── HttpRequestTool.java
-            ├── FileReadTool.java
-            └── FileWriteTool.java
+        │   ├── McpServer.java            # MCP HTTP 服务端
+        │   ├── JsonRpcRequest.java       # JSON-RPC 请求解析
+        │   └── JsonRpcResponse.java      # JSON-RPC 响应构造
+        ├── tools/
+        │   ├── Tool.java                # 工具接口
+        │   ├── ToolManager.java          # 工具管理 + 系统提示词生成
+        │   ├── PythonTool.java           # Python 工具入口
+        │   ├── PythonBridge.java         # Python JNI 桥接 Java 层
+        │   ├── ShellTool.java            # Shell 工具
+        │   ├── FileReadTool.java         # 文件读取
+        │   ├── FileWriteTool.java        # 文件写入
+        │   ├── HttpRequestTool.java      # HTTP 请求
+        │   ├── LuaExecuteTool.java       # Lua 执行
+        │   └── ...                      # 其他工具
+        └── gm/
+            ├── LuaEngine.java            # Lua 引擎
+            ├── MemoryEngine.java         # 内存读写引擎
+            ├── MemoryFreezer.java        # 内存冻结
+            ├── ProcessManager.java       # 进程管理
+            └── RootManager.java          # Root 权限管理
 ```
+
+---
+
+## Python 内嵌架构
+
+### 工作原理
+
+```
+AI 调用 python 工具
+    │
+    ▼
+PythonTool.execute()
+    │
+    ▼
+PythonBridge.init(context)          ← 首次调用时初始化
+    │  1. 从 assets 提取标准库到 files/python/lib/python3.14/
+    │  2. 设置 PYTHONHOME = files/python/
+    │  3. nativeInit() → JNI 调用
+    │
+    ▼
+python_bridge.c: nativeInit()
+    │  1. ensure_std_fds()          ← 修复 Android fd 0/1/2
+    │  2. setenv("PYTHONHOME", ...)
+    │  3. Py_PreInitialize()        ← Python 预初始化
+    │  4. 信号保护 (sigsetjmp)
+    │  5. Py_Initialize()           ← 初始化解释器
+    │  6. 验证 encodings/os 模块
+    │  7. PyEval_SaveThread()       ← 释放 GIL
+    │
+    ▼
+PythonBridge.exec(code)
+    │
+    ▼
+python_bridge.c: nativeExec()
+    │  1. PyGILState_Ensure()       ← 获取 GIL
+    │  2. 重定向 stdout/stderr 到 StringIO
+    │  3. PyRun_String()            ← 执行用户代码
+    │  4. 捕获输出和异常
+    │  5. PyGILState_Release()      ← 释放 GIL
+    │
+    ▼
+返回结果给 AI
+```
+
+### 标准库提取
+
+首次启动时，`PythonBridge` 将 `assets/python/stdlib/` 提取到：
+
+```
+/data/data/com.example.agenttoolbox/files/python/
+└── lib/
+    └── python3.14/          ← PYTHONHOME/lib/python3.14/
+        ├── os.py            ← Python 核心模块
+        ├── encodings/       ← 编码支持
+        ├── lib-dynload/     ← 编译扩展 (.so)
+        ├── asyncio/         # 异步 IO
+        ├── json/            # JSON 处理
+        └── ...
+```
+
+版本号存储在 `files/.python_version`，升级版本号会强制重新提取。
+
+### 编译 JNI 库
+
+```bash
+# 使用 Android NDK r27b 编译
+mkdir build && cd build
+cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-24 \
+    -DANDROID_STL=none \
+    -DCMAKE_BUILD_TYPE=Release \
+    ../src/main/c
+cmake --build .
+
+# 部署到项目
+cp libpython_bridge.so ../libs/arm64-v8a/
+cp libpython_bridge.so ../app/src/main/jniLibs/arm64-v8a/
+```
+
+---
+
+## 快速开始
+
+### 1. 编译安装
+
+**AIDE Pro（推荐）：**
+1. 将项目复制到手机
+2. AIDE Pro 打开项目 → 构建 → 安装
+
+**Gradle（需 Android Studio）：**
+```bash
+./gradlew assembleDebug
+# APK 输出到 app/build/outputs/apk/debug/
+```
+
+### 2. 启动 MCP 服务
+
+1. 打开应用 → 点击「启动MCP服务」
+2. 记录显示的地址（如 `http://192.168.1.100:8080`）
+3. 同一局域网浏览器访问该地址打开测试客户端
+
+### 3. 使用 DeepSeek 集成
+
+1. 点击「打开 DeepSeek 助手」
+2. 登录 DeepSeek 账号
+3. 对话中 AI 会自动调用本地工具
 
 ---
 
@@ -89,14 +224,35 @@ AgentToolbox/
 
 ### 支持的方法
 
-| 方法名 | 说明 |
-|--------|------|
-| `initialize` | 初始化连接 |
+| 方法 | 说明 |
+|------|------|
+| `initialize` | 初始化连接（返回工具列表和协议信息） |
 | `tools/list` | 获取所有工具列表 |
 | `tools/call` | 调用指定工具 |
 | `notifications/initialized` | 初始化完成通知 |
 
-### 错误码（JSON-RPC 2.0 标准）
+### JavaScript 调用示例
+
+```javascript
+// 调用 Python 工具
+fetch('http://手机IP:8080', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1001,
+    method: 'tools/call',
+    params: {
+      name: 'python',
+      arguments: { script: "print('Hello from Python 3.14!')" }
+    }
+  })
+})
+.then(res => res.json())
+.then(data => console.log(data));
+```
+
+### 错误码
 
 | 错误码 | 说明 |
 |--------|------|
@@ -106,118 +262,89 @@ AgentToolbox/
 | -32602 | 参数无效 |
 | -32603 | 内部错误 |
 
-### JavaScript 调用示例
+---
 
-```javascript
-// 获取工具列表
-fetch('http://手机IP:8080', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    jsonrpc: '2.0',
-    id: 'req_001',
-    method: 'tools/list',
-    params: {}
-  })
-})
-.then(res => res.json())
-.then(data => console.log(data));
+## 调试
 
-// 调用数学计算工具
-fetch('http://手机IP:8080', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    jsonrpc: '2.0',
-    id: 'req_002',
-    method: 'tools/call',
-    params: {
-      name: 'math_calculator',
-      arguments: { expression: '2 + 3 * 4' }
-    }
-  })
-})
-.then(res => res.json())
-.then(data => console.log(data));
+### 查看 Python 初始化日志
+
+```bash
+adb logcat -s PythonBridge PythonBridge-C
 ```
+
+关键日志标签：
+- `PythonBridge` — Java 层日志（标准库提取、初始化状态）
+- `PythonBridge-C` — Native 层日志（目录检查、Py_Initialize、GIL 管理）
+
+### 常见问题排查
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| Python 工具未初始化 | JNI 加载失败 | 查看 logcat `PythonBridge-C` |
+| `Failed to import encodings` | 标准库路径错误 | 检查 `PYTHONHOME/lib/python3.14/encodings/` |
+| `Py_Initialize 崩溃` | fd 0/1/2 关闭 | `ensure_std_fds()` 自动修复 |
+| 第二次调用挂起 | GIL 死锁 | `PyEval_SaveThread` 正确释放 |
+| `os.py 不存在` | assets 提取错误 | 删除 `files/python/` 重新提取 |
 
 ---
 
-## 扩展开发：添加新工具
+## 扩展开发
 
-### 步骤 1：创建工具类
+### 添加新工具
+
+1. 实现 `Tool` 接口：
 
 ```java
-package com.example.agenttoolbox.tools;
-
-import org.json.JSONObject;
-
 public class MyTool implements Tool {
+    @Override
+    public String getName() { return "my_tool"; }
 
     @Override
-    public String getName() {
-        return "my_tool";
-    }
-
-    @Override
-    public String getDescription() {
-        return "我的自定义工具";
-    }
+    public String getDescription() { return "我的工具"; }
 
     @Override
     public JSONObject getInputSchema() {
-        // 按照 JSON Schema 返回参数定义
-        JSONObject schema = new JSONObject();
-        // ...
-        return schema;
+        // 返回 JSON Schema
     }
 
     @Override
     public String execute(JSONObject arguments) throws Exception {
-        // 实现工具逻辑
-        return "执行结果";
+        // 实现逻辑，返回文本结果
     }
 }
 ```
 
-### 步骤 2：在 ToolManager 注册
+2. 在 `ToolManager.init()` 中注册：
 
 ```java
-// ToolManager.java 构造方法中添加：
 registerTool(new MyTool());
 ```
 
 ---
 
-## 注意事项
-
-1. **网络权限**：应用已申请 INTERNET 权限，请确保手机网络正常
-2. **端口冲突**：默认使用 8080 端口，如需修改请在 `MainActivity.java` 中修改 `PORT` 常量
-3. **安全限制**：文件操作仅限应用内部存储目录（`/data/data/com.example.agenttoolbox/files/`），已内置路径遍历攻击防护
-4. **同一局域网**：网页端和手机必须在同一 WiFi 网络下才能访问 MCP 服务
-5. **源码提取**：使用 `evaluateJavascript` 方式直接返回结果（无需依赖 alert，避免超时问题）
-
----
-
 ## 版本信息
 
-- **版本**：1.2.0
-- **协议**：MCP 2024-11-05（JSON-RPC 2.0 over HTTP）
-- **最低 Android 版本**：API 21 (Android 5.0)
-- **目标 SDK**：API 30 (Android 11)
+- **Python**: 3.14.6 (官方 Android aarch64 构建)
+- **协议**: MCP (JSON-RPC 2.0 over HTTP)
+- **最低 Android**: API 24 (Android 7.0)
+- **目标 SDK**: API 32 (Android 12)
+- **ABI**: arm64-v8a
 
 ### 更新日志
 
+**v2.0.0 — Python 3.14 内嵌重构**
+- 使用 Python 3.14.6 官方 Android 包重新适配
+- JNI 嵌入模式，无需 Termux 或外部 Python
+- 修复 GIL 死锁（`PyEval_SaveThread`）
+- 修复 fd 0/1/2 关闭导致的崩溃
+- 信号保护机制防止 `Py_Initialize` 崩溃杀进程
+- 完整标准库含 `lib-dynload` 扩展模块
+
 **v1.2.0**
-- **根本性修复**：流式传输工具调用 JSON 时禁用心跳消息，避免心跳中断 JSON 流导致 JSON 不完整
-- 新增工具调用检测方法，当检测到工具调用 JSON 时自动禁用心跳，流完成后恢复
-- 改进错误处理：当流异常中断时，确保心跳恢复而不被永久禁用
-- 完全解决"超时：工具调用 JSON 不完整"问题，支持任意长度的工具执行时间
+- 修复流式传输工具调用 JSON 时心跳中断问题
 
 **v1.1.0**
-- 修复 DeepSeekActivity 中「提取源码」功能超时问题（改用 evaluateJavascript 替代 alert 通信）
-- 新增页面源码提取返回结果解析与错误处理
-- 优化超时时间从 5s 调整为 8s，适配大页面提取
+- 修复 DeepSeek 源码提取超时（改用 `evaluateJavascript`）
 
 **v1.0.0**
 - 初始版本：MCP 服务端 + DeepSeek 集成 + 4 个内置工具
