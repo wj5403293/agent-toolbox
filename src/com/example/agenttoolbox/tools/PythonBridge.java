@@ -75,9 +75,11 @@ public class PythonBridge {
         }
 
         try {
-            String homePath = pythonHome.getAbsolutePath();
+            // extractAssetDir 提取为 pythonHome/stdlib/ 结构，PYTHONHOME 需指向该子目录
+            File pythonHomeDir = new File(pythonHome, "stdlib");
+            String homePath = pythonHomeDir.getAbsolutePath();
             android.util.Log.i("PythonBridge", "JNI init: PYTHONHOME=" + homePath);
-            android.util.Log.i("PythonBridge", "JNI init: pythonHome 存在=" + pythonHome.exists() + " 路径=" + homePath);
+            android.util.Log.i("PythonBridge", "JNI init: pythonHomeDir 存在=" + pythonHomeDir.exists() + " 路径=" + homePath);
 
             jniInitRetCode = nativeInit(homePath);
             android.util.Log.i("PythonBridge", "JNI init 返回码: " + jniInitRetCode);
@@ -112,11 +114,12 @@ public class PythonBridge {
         }
 
         if (!jniInitOk) {
+            String homePath = (pythonHome != null) ? new File(pythonHome, "stdlib").getAbsolutePath() : "未设置";
             return "[错误] Python 未初始化，详细信息:\n"
                 + "  - JNI 库: 已加载 (libpython_bridge.so)\n"
                 + "  - JNI init: 失败 (返回码=" + jniInitRetCode + ")\n"
                 + "  - 错误信息: " + (jniInitError.isEmpty() ? "无" : jniInitError) + "\n"
-                + "  - PYTHONHOME: " + (pythonHome != null ? pythonHome.getAbsolutePath() : "未设置") + "\n"
+                + "  - PYTHONHOME: " + homePath + "\n"
                 + "  - 请重启应用或查看 logcat 标签 PythonBridge-C 排查原因";
         }
 
@@ -156,10 +159,11 @@ public class PythonBridge {
     private static native String nativeGetLastError();
 
     /**
-     * 供 native 层回调获取 Python Home 路径
+     * 供 native 层回调获取 Python Home 路径（含 stdlib 子目录）
      */
     private static String getPythonHome() {
-        return pythonHome != null ? pythonHome.getAbsolutePath() : null;
+        if (pythonHome == null) return null;
+        return new File(pythonHome, "stdlib").getAbsolutePath();
     }
 
     // ===== 进程模式 =====
@@ -349,7 +353,10 @@ public class PythonBridge {
     }
 
     private static boolean isStdlibReady(File dir) {
-        return dir.exists() && new File(dir, "os.py").exists();
+        // extractAssetDir 提取为 dir/stdlib/ 结构，检查 os.py 是否在 stdlib/lib/python3.14/ 下
+        File stdlibDir = new File(dir, "stdlib");
+        return stdlibDir.exists()
+            && new File(stdlibDir, "lib/python3.14/os.py").exists();
     }
 
     private static void deleteRecursive(File f) {
