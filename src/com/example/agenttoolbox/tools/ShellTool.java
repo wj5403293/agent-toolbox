@@ -87,7 +87,7 @@ public class ShellTool implements Tool {
 
         // 失败时附加简要诊断提示
         if (result.exitCode != 0 && !result.timedOut) {
-            sb.append("\n提示: 命令失败，可用 `which <tool>` 检查工具是否存在");
+            sb.append("\n提示: 命令失败。注意：Python 请直接用 python 工具执行，不要用 shell 调用");
         }
 
         return sb.toString();

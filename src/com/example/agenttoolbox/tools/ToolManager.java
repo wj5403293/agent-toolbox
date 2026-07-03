@@ -144,6 +144,8 @@ public class ToolManager {
             rules.put("file_write 的三种模式：replace=替换指定行（默认），insert=在指定行前插入，append=追加到末尾。优先用 insert/append 避免行号偏移");
             rules.put("多步编辑时：每次写入后行号会变化。如果连续修改多处，优先用 insert/append，或从文件末尾往前改（避免行号漂移）");
             rules.put("file_write 的 content 参数会自动剥离行号前缀，可以直接把 file_read 的输出当 content 传入");
+            rules.put("Python 工具已内嵌 Python 3.14 环境，直接调用 python 工具即可执行代码，无需通过 shell 检查 Python 是否可用");
+            rules.put("执行 Python 代码时直接使用 python 工具，不要用 shell which python 或 shell python3 等方式");
             prompt.put("rules", rules);
 
             // 文件操作最佳实践
@@ -179,6 +181,20 @@ public class ToolManager {
                                     .put("arguments", new JSONObject().put("path", "config.txt").put("line", 3).put("content", "").put("mode", "replace")))
                             .put("id", 1001)));
             prompt.put("file_ops", fileOps);
+
+            // Python 使用示例
+            JSONArray pythonOps = new JSONArray();
+            pythonOps.put(new JSONObject().put("scenario", "执行 Python 代码").put("call",
+                    new JSONObject().put("jsonrpc", "2.0").put("method", "tools/call")
+                            .put("params", new JSONObject().put("name", "python")
+                                    .put("arguments", new JSONObject().put("script", "print(1 + 1)")))
+                            .put("id", 1001)));
+            pythonOps.put(new JSONObject().put("scenario", "执行多行 Python").put("call",
+                    new JSONObject().put("jsonrpc", "2.0").put("method", "tools/call")
+                            .put("params", new JSONObject().put("name", "python")
+                                    .put("arguments", new JSONObject().put("script", "import os\nprint(os.listdir('/'))")))
+                            .put("id", 1001)));
+            prompt.put("python_ops", pythonOps);
 
             // 工具列表
             JSONArray tools = new JSONArray();
