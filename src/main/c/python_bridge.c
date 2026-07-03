@@ -6,13 +6,35 @@
 #include <setjmp.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #define LOG_TAG "PythonBridge-C"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static int python_initialized = 0;
-static char last_error[512] = "";
+static char last_error[2048] = "";
+
+static void log_check_dir(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            DIR *d = opendir(path);
+            int count = 0;
+            if (d) {
+                struct dirent *ent;
+                while ((ent = readdir(d)) != NULL) count++;
+                closedir(d);
+            }
+            LOGI("  [目录存在] %s (含 %d 项)", path, count);
+        } else {
+            LOGI("  [文件存在] %s (%ld bytes)", path, (long)st.st_size);
+        }
+    } else {
+        LOGE("  [不存在] %s (errno=%d: %s)", path, errno, strerror(errno));
+    }
+}
 
 JNIEXPORT jint JNICALL
 JNI_OnLoad(JavaVM *vm, void *reserved) {
@@ -46,6 +68,22 @@ Java_com_example_agenttoolbox_tools_PythonBridge_nativeInit(
     const char *home_utf8 = (*env)->GetStringUTFChars(env, home, NULL);
     LOGI("nativeInit: PYTHONHOME=%s", home_utf8);
 
+    // 详细目录诊断
+    LOGI("nativeInit: === 目录存在性检查 ===");
+    log_check_dir(home_utf8);
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s/lib", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/lib/python3.14", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/lib/python3.14/encodings", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/lib/python3.14/encodings/__init__.py", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/lib/python3.14/os.py", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/stdlib", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/stdlib/lib/python3.14", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/stdlib/lib/python3.14/encodings", home_utf8); log_check_dir(buf);
+    snprintf(buf, sizeof(buf), "%s/stdlib/lib/python3.14/os.py", home_utf8); log_check_dir(buf);
+    LOGI("nativeInit: === 目录检查结束 ===");
+
     // 先尝试加载 libpython3.14.so
     void *handle = dlopen("libpython3.14.so", RTLD_NOW | RTLD_GLOBAL);
     if (!handle) {
@@ -72,14 +110,39 @@ Java_com_example_agenttoolbox_tools_PythonBridge_nativeInit(
     config.install_signal_handlers = 0;
     config.site_import = 0;
 
+    // 输出 PyConfig 关键参数
+    LOGI("nativeInit: PyConfig 参数:");
+    LOGI("  home=%s", config.home ? PyUnicode_AsUTF8(config.home) : "(null)");
+    LOGI("  module_search_paths_set=%d", config.module_search_paths_set);
+    LOGI("  nmodule_search_paths=%ld", (long)config.nmodule_search_paths);
+    for (Py_ssize_t i = 0; i < config.nmodule_search_paths && i < 10; i++) {
+        LOGI("  module_search_paths[%ld]=%s", (long)i,
+             config.module_search_paths[i] ? PyUnicode_AsUTF8(config.module_search_paths[i]) : "(null)");
+    }
+
     LOGI("nativeInit: Py_InitializeFromConfig...");
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     (*env)->ReleaseStringUTFChars(env, home, home_utf8);
 
     if (PyStatus_Exception(status)) {
-        snprintf(last_error, sizeof(last_error), "Py_InitializeFromConfig 失败: %s",
-                 status.err_msg ? status.err_msg : "unknown");
+        const char *err_msg = status.err_msg ? status.err_msg : "unknown";
+        // 捕获更多错误上下文
+        PyObject *exc_type = NULL, *exc_val = NULL, *exc_tb = NULL;
+        PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
+        char detail[1024] = "";
+        if (exc_val) {
+            PyObject *str = PyObject_Str(exc_val);
+            if (str) {
+                const char *s = PyUnicode_AsUTF8(str);
+                if (s) snprintf(detail, sizeof(detail), " | Python异常: %s", s);
+                Py_DECREF(str);
+            }
+            Py_XDECREF(exc_type); Py_XDECREF(exc_val); Py_XDECREF(exc_tb);
+            PyErr_Clear();
+        }
+        snprintf(last_error, sizeof(last_error), "Py_InitializeFromConfig 失败: %s%s",
+                 err_msg, detail);
         LOGE("nativeInit: %s", last_error);
         return -3;
     }

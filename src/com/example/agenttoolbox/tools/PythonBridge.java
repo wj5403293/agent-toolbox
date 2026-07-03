@@ -24,7 +24,7 @@ public class PythonBridge {
     private static final String STDLIB_ASSET_DIR = "python/stdlib";
     private static final String PYTHON_DIR_NAME = "python";
     private static final String VERSION_FILE = ".python_version";
-    private static final String EXPECTED_VERSION = "3.14.6-v2";
+    private static final String EXPECTED_VERSION = "3.14.6-v3";
 
     // JNI 模式
     private static boolean jniLoaded = false;
@@ -285,9 +285,78 @@ public class PythonBridge {
     // ===== 内部工具 =====
 
     private static void extractStdlib(Context context) throws Exception {
+        // 先列出 assets 中的原始结构
+        android.util.Log.i("PythonBridge", "=== Assets 结构扫描: " + STDLIB_ASSET_DIR + " ===");
+        logAssetTree(context, STDLIB_ASSET_DIR, 0);
+
         if (pythonHome.exists()) deleteRecursive(pythonHome);
         pythonHome.mkdirs();
         extractAssetDir(context, STDLIB_ASSET_DIR, pythonHome);
+
+        // 提取后列出实际文件树
+        android.util.Log.i("PythonBridge", "=== 提取后文件树: " + pythonHome.getAbsolutePath() + " ===");
+        logFileTree(pythonHome, 0);
+    }
+
+    /**
+     * 递归列出 assets 目录结构（日志）
+     */
+    private static void logAssetTree(Context context, String assetPath, int depth) {
+        String[] names;
+        try {
+            names = context.getAssets().list(assetPath);
+        } catch (Exception e) {
+            android.util.Log.i("PythonBridge", indent(depth) + "[无法列出: " + e.getMessage() + "]");
+            return;
+        }
+        if (names == null || names.length == 0) {
+            android.util.Log.i("PythonBridge", indent(depth) + "(文件) " + assetPath);
+            return;
+        }
+        android.util.Log.i("PythonBridge", indent(depth) + assetPath + "/ [" + names.length + "项]");
+        // 最多输出前30项避免日志爆炸
+        int limit = Math.min(names.length, 30);
+        for (int i = 0; i < limit; i++) {
+            logAssetTree(context, assetPath + "/" + names[i], depth + 1);
+        }
+        if (names.length > 30) {
+            android.util.Log.i("PythonBridge", indent(depth + 1) + "... 还有 " + (names.length - 30) + " 项");
+        }
+    }
+
+    /**
+     * 递归列出文件目录树（日志）
+     */
+    private static void logFileTree(File dir, int depth) {
+        if (depth > 5) {
+            android.util.Log.i("PythonBridge", indent(depth) + "(深度限制，停止)");
+            return;
+        }
+        File[] children = dir.listFiles();
+        if (children == null || children.length == 0) {
+            android.util.Log.i("PythonBridge", indent(depth) + "(空目录) " + dir.getName());
+            return;
+        }
+        // 最多输出前30项
+        int limit = Math.min(children.length, 30);
+        for (int i = 0; i < limit; i++) {
+            File f = children[i];
+            if (f.isDirectory()) {
+                android.util.Log.i("PythonBridge", indent(depth) + f.getName() + "/");
+                logFileTree(f, depth + 1);
+            } else {
+                android.util.Log.i("PythonBridge", indent(depth) + f.getName() + " (" + f.length() + "B)");
+            }
+        }
+        if (children.length > 30) {
+            android.util.Log.i("PythonBridge", indent(depth) + "... 还有 " + (children.length - 30) + " 项");
+        }
+    }
+
+    private static String indent(int depth) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < depth; i++) sb.append("  ");
+        return sb.toString();
     }
 
     private static void extractAssetDir(Context context, String assetPath, File targetDir)
