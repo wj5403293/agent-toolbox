@@ -24,7 +24,7 @@ public class PythonBridge {
     private static final String STDLIB_ASSET_DIR = "python/stdlib";
     private static final String PYTHON_DIR_NAME = "python";
     private static final String VERSION_FILE = ".python_version";
-    private static final String EXPECTED_VERSION = "3.14.6";
+    private static final String EXPECTED_VERSION = "3.14.6-v2";
 
     // JNI 模式
     private static boolean jniLoaded = false;
@@ -75,11 +75,10 @@ public class PythonBridge {
         }
 
         try {
-            // extractAssetDir 提取为 pythonHome/stdlib/ 结构，PYTHONHOME 需指向该子目录
-            File pythonHomeDir = new File(pythonHome, "stdlib");
-            String homePath = pythonHomeDir.getAbsolutePath();
+            String homePath = pythonHome.getAbsolutePath();
             android.util.Log.i("PythonBridge", "JNI init: PYTHONHOME=" + homePath);
-            android.util.Log.i("PythonBridge", "JNI init: pythonHomeDir 存在=" + pythonHomeDir.exists() + " 路径=" + homePath);
+            android.util.Log.i("PythonBridge", "JNI init: pythonHome 存在=" + pythonHome.exists() + " 路径=" + homePath);
+            android.util.Log.i("PythonBridge", "JNI init: lib/python3.14/os.py=" + new File(pythonHome, "lib/python3.14/os.py").exists());
 
             jniInitRetCode = nativeInit(homePath);
             android.util.Log.i("PythonBridge", "JNI init 返回码: " + jniInitRetCode);
@@ -114,7 +113,7 @@ public class PythonBridge {
         }
 
         if (!jniInitOk) {
-            String homePath = (pythonHome != null) ? new File(pythonHome, "stdlib").getAbsolutePath() : "未设置";
+            String homePath = (pythonHome != null) ? pythonHome.getAbsolutePath() : "未设置";
             return "[错误] Python 未初始化，详细信息:\n"
                 + "  - JNI 库: 已加载 (libpython_bridge.so)\n"
                 + "  - JNI init: 失败 (返回码=" + jniInitRetCode + ")\n"
@@ -159,11 +158,10 @@ public class PythonBridge {
     private static native String nativeGetLastError();
 
     /**
-     * 供 native 层回调获取 Python Home 路径（含 stdlib 子目录）
+     * 供 native 层回调获取 Python Home 路径
      */
     private static String getPythonHome() {
-        if (pythonHome == null) return null;
-        return new File(pythonHome, "stdlib").getAbsolutePath();
+        return pythonHome != null ? pythonHome.getAbsolutePath() : null;
     }
 
     // ===== 进程模式 =====
@@ -304,17 +302,17 @@ public class PythonBridge {
             extractAssetFile(context, assetPath, targetDir);
             return;
         }
-        File subDir = new File(targetDir, assetPath.substring(assetPath.lastIndexOf('/') + 1));
-        if (!subDir.exists()) subDir.mkdirs();
+        // 直接提取到 targetDir，不额外包装子目录
+        if (!targetDir.exists()) targetDir.mkdirs();
         for (String name : names) {
             String childPath = assetPath + "/" + name;
             String[] childNames = context.getAssets().list(childPath);
             if (childNames != null && childNames.length > 0) {
-                File childDir = new File(subDir, name);
+                File childDir = new File(targetDir, name);
                 if (!childDir.exists()) childDir.mkdirs();
                 extractAssetDirRecursive(context, childPath, childDir);
             } else {
-                extractAssetFile(context, childPath, subDir);
+                extractAssetFile(context, childPath, targetDir);
             }
         }
     }
@@ -353,10 +351,9 @@ public class PythonBridge {
     }
 
     private static boolean isStdlibReady(File dir) {
-        // extractAssetDir 提取为 dir/stdlib/ 结构，检查 os.py 是否在 stdlib/lib/python3.14/ 下
-        File stdlibDir = new File(dir, "stdlib");
-        return stdlibDir.exists()
-            && new File(stdlibDir, "lib/python3.14/os.py").exists();
+        // assets 中 python/stdlib/lib/python3.14/... 直接提取到 dir/lib/python3.14/...
+        return dir.exists()
+            && new File(dir, "lib/python3.14/os.py").exists();
     }
 
     private static void deleteRecursive(File f) {
