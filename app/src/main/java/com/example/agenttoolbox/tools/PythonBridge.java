@@ -55,7 +55,8 @@ public class PythonBridge {
         android.util.Log.i("PythonBridge", "init: jniLoaded=" + jniLoaded + " processReady=" + processReady);
 
         // 已初始化
-        if (jniLoaded || processReady) return true;
+        if (jniLoaded && nativeIsInitialized()) return true;
+        if (processReady) return true;
 
         // 解压标准库（两种模式都需要）
         if (!isStdlibReady(pythonHome) || !readFile(versionFile).equals(EXPECTED_VERSION)) {
@@ -92,12 +93,17 @@ public class PythonBridge {
      * 执行 Python 代码
      */
     public static String exec(String code) throws Exception {
+        android.util.Log.i("PythonBridge", "exec: jniLoaded=" + jniLoaded + " processReady=" + processReady);
+
         // 模式 1: JNI
         if (jniLoaded) {
             try {
-                return nativeExec(code);
-            } catch (Exception e) {
-                android.util.Log.e("PythonBridge", "JNI exec 失败: " + e.getMessage());
+                String result = nativeExec(code);
+                android.util.Log.i("PythonBridge", "JNI exec 成功，长度=" + (result == null ? 0 : result.length()));
+                return result;
+            } catch (Throwable e) {
+                android.util.Log.e("PythonBridge", "JNI exec 失败: " + e.getClass().getName() + ": " + e.getMessage());
+                throw new Exception("JNI 执行失败: " + e.getMessage());
             }
         }
 
@@ -106,7 +112,7 @@ public class PythonBridge {
             return execViaProcess(code);
         }
 
-        throw new Exception("Python 不可用（JNI=" + jniLoaded + " process=" + processReady + "）。请先调用 init() 或安装 Termux Python");
+        throw new Exception("Python 不可用（JNI=" + jniLoaded + " process=" + processReady + "）");
     }
 
     public static boolean isAvailable() {

@@ -2,16 +2,26 @@
 #include <Python.h>
 #include <string.h>
 #include <stdlib.h>
+#include <android/log.h>
+
+#define LOG_TAG "PythonBridge-C"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 /**
  * Python JNI 桥接层
- *
- * 通过 libpython3.14.so 在进程内执行 Python 代码，
- * 避免启动外部进程，直接共享内存空间。
  */
 
-// 全局状态：Python 是否已初始化
 static int python_initialized = 0;
+
+/**
+ * JNI 库加载时调用
+ */
+JNIEXPORT jint JNICALL
+JNI_OnLoad(JavaVM *vm, void *reserved) {
+    LOGI("JNI_OnLoad: libpython_bridge.so 已加载");
+    return JNI_VERSION_1_6;
+}
 
 /**
  * 初始化 Python 运行时
@@ -24,37 +34,39 @@ Java_com_example_agenttoolbox_tools_PythonBridge_nativeInit(
     JNIEnv *env, jobject obj, jstring home
 ) {
     if (python_initialized) {
+        LOGI("nativeInit: 已初始化，跳过");
         return 0;
     }
 
     const char *home_utf8 = (*env)->GetStringUTFChars(env, home, NULL);
+    LOGI("nativeInit: PYTHONHOME=%s", home_utf8);
 
     PyConfig config;
     PyConfig_InitPythonConfig(&config);
 
-    // 设置 Python Home（标准库位置）
     PyStatus status = PyConfig_SetBytesString(&config, &config.home, home_utf8);
     if (PyStatus_Exception(status)) {
+        LOGE("nativeInit: PyConfig_SetBytesString 失败: %s", status.err_msg ? status.err_msg : "");
         (*env)->ReleaseStringUTFChars(env, home, home_utf8);
         PyConfig_Clear(&config);
         return -1;
     }
 
-    // 不注册信号处理器（Android 环境）
     config.install_signal_handlers = 0;
-
-    // 不导入 site 模块（减少启动时间）
     config.site_import = 0;
 
+    LOGI("nativeInit: 调用 Py_InitializeFromConfig...");
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     (*env)->ReleaseStringUTFChars(env, home, home_utf8);
 
     if (PyStatus_Exception(status)) {
+        LOGE("nativeInit: Py_InitializeFromConfig 失败: %s", status.err_msg ? status.err_msg : "");
         return -1;
     }
 
     python_initialized = 1;
+    LOGI("nativeInit: Python 初始化成功!");
     return 0;
 }
 
