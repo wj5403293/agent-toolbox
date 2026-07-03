@@ -140,70 +140,22 @@ Java_com_example_agenttoolbox_tools_PythonBridge_nativeInit(
     }
     LOGI("nativeInit: Py_PreInitialize 成功");
 
-    // 用 PyConfig_InitPythonConfig 初始化（让 Python 检测 Android 平台）
-    LOGI("nativeInit: PyConfig_InitPythonConfig...");
-    PyConfig config;
-    PyConfig_InitPythonConfig(&config);
+    // 用 Py_Initialize() 直接初始化（比 PyConfig 更稳定，避免 Android 初始化坑）
+    // ensure_std_fds() 已修复 fd 问题，不会崩溃
+    LOGI("nativeInit: Py_Initialize...");
+    Py_Initialize();
 
-    status = PyConfig_SetBytesString(&config, &config.home, home_utf8);
-    if (PyStatus_Exception(status)) {
-        snprintf(last_error, sizeof(last_error), "PyConfig_SetBytesString(home) 失败: %s",
-                 status.err_msg ? status.err_msg : "unknown");
+    if (!Py_IsInitialized()) {
+        snprintf(last_error, sizeof(last_error),
+                 "Py_Initialize 失败: 进程可能已崩溃 (PYTHONHOME=%s)", home_utf8);
         LOGE("nativeInit: %s", last_error);
         (*env)->ReleaseStringUTFChars(env, home, home_utf8);
-        PyConfig_Clear(&config);
-        return -2;
-    }
-
-    // 关键 Android 适配参数
-    config.install_signal_handlers = 0;   // 禁用信号处理
-    config.site_import = 0;                // 禁用 site
-    config.parse_argv = 0;                // 不解析 argv
-    config.buffered_stdio = 0;            // 禁用 buffered stdio（避免 Android streams 问题）
-    config.interactive = 0;
-    config.optimization_level = 2;
-    config.quiet = 1;
-
-    // 设置 executable 绕过 _android_support.init_streams()
-    // init_streams() 检查 sys.executable 非空则跳过 Android 流初始化
-    status = PyConfig_SetBytesString(&config, &config.executable,
-                                      "/data/user/0/com.example.agenttoolbox/files/python/python3");
-    if (PyStatus_Exception(status)) {
-        LOGI("nativeInit: PyConfig_SetBytesString(executable) 失败(非致命): %s",
-             status.err_msg ? status.err_msg : "unknown");
-    }
-
-    LOGI("nativeInit: PyConfig: home=%s buffered_stdio=0 parse_argv=0 install_signal_handlers=0",
-         home_utf8);
-
-    LOGI("nativeInit: Py_InitializeFromConfig...");
-    status = Py_InitializeFromConfig(&config);
-    PyConfig_Clear(&config);
-    (*env)->ReleaseStringUTFChars(env, home, home_utf8);
-
-    if (PyStatus_Exception(status)) {
-        const char *err_msg = status.err_msg ? status.err_msg : "unknown";
-        // 尝试捕获 Python 异常详情
-        PyObject *exc_type = NULL, *exc_val = NULL, *exc_tb = NULL;
-        PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
-        char detail[1024] = "";
-        if (exc_val) {
-            PyObject *str = PyObject_Str(exc_val);
-            if (str) {
-                const char *s = PyUnicode_AsUTF8(str);
-                if (s) snprintf(detail, sizeof(detail), " | 异常: %s", s);
-                Py_DECREF(str);
-            }
-            Py_XDECREF(exc_type); Py_XDECREF(exc_val); Py_XDECREF(exc_tb);
-            PyErr_Clear();
-        }
-        snprintf(last_error, sizeof(last_error), "Py_InitializeFromConfig 失败: %s%s",
-                 err_msg, detail);
-        LOGE("nativeInit: %s", last_error);
         return -3;
     }
 
-    LOGI("nativeInit: Py_InitializeFromConfig 成功!");
+    LOGI("nativeInit: Py_Initialize 成功!");
+
+    (*env)->ReleaseStringUTFChars(env, home, home_utf8);
 
     // 确保 GIL 已获取
     PyGILState_Ensure();
