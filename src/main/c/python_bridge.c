@@ -1,7 +1,9 @@
 #include <jni.h>
 #include <Python.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <signal.h>
 #include <android/log.h>
 #include <dlfcn.h>
@@ -117,16 +119,31 @@ Java_com_example_agenttoolbox_tools_PythonBridge_nativeInit(
     // Android 修复: 确保 fd 0/1/2 存在
     ensure_std_fds();
 
+    // 禁用 _android_support.py 避免初始化崩溃
+    {
+        char android_support_path[512];
+        char android_support_bak[520];
+        snprintf(android_support_path, sizeof(android_support_path),
+                 "%s/lib/python3.14/_android_support.py", home_utf8);
+        snprintf(android_support_bak, sizeof(android_support_bak),
+                 "%s.bak", android_support_path);
+        if (rename(android_support_path, android_support_bak) == 0) {
+            LOGI("nativeInit: 已禁用 _android_support.py -> .bak");
+        } else {
+            LOGI("nativeInit: _android_support.py 重命名跳过 (errno=%d: %s)", errno, strerror(errno));
+        }
+    }
+
     // 设置环境变量
     setenv("PYTHONHOME", home_utf8, 1);
     setenv("PYTHONNOUSERSITE", "1", 1);
     setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
     setenv("PYTHONEXECUTABLE", "/usr/bin/python3", 1);  // 让 sys.executable 非空，绕过 _android_support.init_streams()
 
-    // 预初始化（isolated 模式，不读系统配置）
-    LOGI("nativeInit: Py_PreInitialize (isolated)...");
+    // 预初始化（Python 模式，读取环境变量）
+    LOGI("nativeInit: Py_PreInitialize (python config)...");
     PyPreConfig preconfig;
-    PyPreConfig_InitIsolatedConfig(&preconfig);
+    PyPreConfig_InitPythonConfig(&preconfig);
     preconfig.utf8_mode = 1;
     preconfig.allocator = PYMEM_ALLOCATOR_MALLOC;
 
