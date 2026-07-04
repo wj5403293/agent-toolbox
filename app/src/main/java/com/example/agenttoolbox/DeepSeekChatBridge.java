@@ -958,6 +958,10 @@ public class DeepSeekChatBridge {
             "        Android.log('[DEBUG][' + __rid + '] 成功提取并验证JSON-RPC调用，长度=' + jsonStr.length +\n" +
             "          (robustCompleteAttempt ? '（已通过状态机自动补全' + (robustCompleteAttempt.length - (jsonStr ? jsonStr.length : 0)) + '字符）' : ''));\n" +
             "        // 立即完成，不再等待稳定判定\n" +
+            "        // 必须等 LLM 停止生成（发送按钮就绪）再 finish\n" +
+            "        if (!isSendButtonReady() || isGenerating()) {\n" +
+            "          return; // 继续等待下一次 poll\n" +
+            "        }\n" +
             "        finish(reply);\n" +
             "        return;\n" +
             "      } else {\n" +
