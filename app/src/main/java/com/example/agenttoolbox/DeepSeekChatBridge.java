@@ -962,6 +962,10 @@ public class DeepSeekChatBridge {
             "        if (!isSendButtonReady() || isGenerating()) {\n" +
             "          return; // 继续等待下一次 poll\n" +
             "        }\n" +
+            "        // 发送按钮就绪后等1秒防抖\n" +
+            "        if (typeof _sendReadySince === 'undefined') { _sendReadySince = Date.now(); return; }\n" +
+            "        if (Date.now() - _sendReadySince < 1000) { return; }\n" +
+            "        _sendReadySince = undefined;\n" +
             "        finish(reply);\n" +
             "        return;\n" +
             "      } else {\n" +
