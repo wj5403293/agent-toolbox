@@ -1068,6 +1068,9 @@ public class McpServer {
                                 toolResultMsg.put("id", conversationId);
                             } catch (Exception ignored) {}
                             log("  [轮次" + currentRound + "] 服务端工具结果 JSON: " + toolResultMsg.toString());
+                            // 等待 LLM 完全停止生成后再注入工具结果
+                            // 避免与 LLM 的流式输出冲突导致消息截断
+                            try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
                             currentMessage = toolResultMsg.toString();
                             log("  [轮次" + currentRound + "] 准备进入下一轮对话...");
 
