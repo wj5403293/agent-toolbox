@@ -680,6 +680,437 @@ public class DeepSeekChatBridge {
             "  // 检测发送按钮是否可发送（无停止/暂停图标 = 生成已完毕）\n" +
             "  // 关键信号：向上箭头（M8.3125开头 / L9 3.95717V15.0431 等 send-icon）= 回答完毕，可以发送\n" +
             "  function isSendButtonReady() {\n" +
+            "    var paths = document.querySelectorAll('svg path');\n" +
+            "    for (var i = 0; i < paths.length; i++) {\n" +
+            "      var d = paths[i].getAttribute('d') || '';\n" +
+            "      if (d.indexOf('M8.3125') === 0) return true;\n" +
+            "      if (d.indexOf('M2 4.88') === 0) return false;\n" +
+            "    }\n" +
+            "    return true;\n" +
+            "  }\n" +
+            "  \n" +
+            "  function getAssistantMessages() {\n" +\n" +
+            "    // 策略1：精确内容容器（DeepSeek v1 渲染路径）\n" +
+            "    var list = document.querySelectorAll('.ds-markdown.ds-assistant-message-main-content');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    // 策略2：ds-assistant-message-main-content 独立类（不含 ds-markdown 的场景）\n" +
+            "    list = document.querySelectorAll('[class*=\"ds-assistant-message-main-content\"]');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    // 策略3：ds-markdown--block 块级容器\n" +
+            "    list = document.querySelectorAll('.ds-markdown--block');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    // 策略4：ds-markdown 任意级（可能包含 assistant+system+user，但后面只扫描最后几条即可）\n" +
+            "    list = document.querySelectorAll('[class*=\"ds-markdown\"]');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    // 策略5：ds-message 外层 wrapper，内部取 markdown/content 子节点\n" +
+            "    var msgs = document.querySelectorAll('[class*=\"ds-message\"]');\n" +
+            "    if (msgs && msgs.length > 0) {\n" +
+            "      // 对每个消息容器，再查其内容子节点，组成一个人工数组返回\n" +
+            "      var collected = [];\n" +
+            "      for (var mi = 0; mi < msgs.length; mi++) {\n" +
+            "        var inner = msgs[mi].querySelector('[class*=\"ds-markdown\"], [class*=\"assistant-message\"], [class*=\"content\"], [class*=\"body\"]');\n" +
+            "        if (inner) collected.push(inner);\n" +
+            "      }\n" +
+            "      if (collected.length > 0) return collected;\n" +
+            "    }\n" +
+            "    // 策略6：通用 assistant/message 关键词\n" +
+            "    list = document.querySelectorAll('[class*=\"assistant-message-main\"]');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    list = document.querySelectorAll('[class*=\"assistant-message\"]');\n" +
+            "    if (list && list.length > 0) return list;\n" +
+            "    // 策略7：最兜底\n" +
+            "    return document.querySelectorAll('[class*=\"message\"][class*=\"assistant\"], [class*=\"prose\"], .whitespace-pre-wrap, article, [role=\"article\"]');\n" +
+            "  }\n" +
+            "\n" +
+            "  // 结构化分析元素内容：统计各类标签数量，便于调试内容一致性\n" +
+            "  function analyzeContentStructure(el, reply) {\n" +
+            "    if (!el) return;\n" +
+            "    try {\n" +
+            "      var pCount = el.querySelectorAll('p').length;\n" +
+            "      var hCount = el.querySelectorAll('h1,h2,h3,h4,h5,h6').length;\n" +
+            "      var tableCount = el.querySelectorAll('table').length;\n" +
+            "      var listCount = el.querySelectorAll('ul,ol').length;\n" +
+            "      var preCount = el.querySelectorAll('pre').length;\n" +
+            "      var codeCount = el.querySelectorAll('code').length;\n" +
+            "      var spanCodeCount = el.querySelectorAll('span[class*=\"code\"],span[class*=\"ds-markdown\"]').length;\n" +
+            "      var aCount = el.querySelectorAll('a').length;\n" +
+            "      var brCount = el.querySelectorAll('br').length;\n" +
+            "      var divCount = el.querySelectorAll('div').length;\n" +
+            "      var innerTxt = (el.innerText || '').trim();\n" +
+            "      Android.log('[DEBUG-STRUCT] 内容结构: 段落=' + pCount + ' 标题=' + hCount +\n" +
+            "        ' 表格=' + tableCount + ' 列表=' + listCount + ' 代码块=' + preCount +\n" +
+            "        ' code标签=' + codeCount + ' span代码=' + spanCodeCount +\n" +
+            "        ' 链接=' + aCount + ' br=' + brCount + ' div=' + divCount +\n" +
+            "        ' innerText长度=' + innerTxt.length);\n" +
+            "      if (reply && reply.length > 0) {\n" +
+            "        Android.log('[DEBUG-STRUCT] 转换后Markdown长度=' + reply.length + ' 首行=' + reply.substring(0, Math.min(100, reply.length)));\n" +
+            "      }\n" +
+            "    } catch (_se) { Android.log('[DEBUG-STRUCT] 分析异常: ' + _se.message); }\n" +
+            "  }\n" +
+            "\n" +
+            "  // 全局 JSON-RPC 扫描：直接从整个文档提取完整的 JSON-RPC 内容\n" +
+            "  // 用于应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
+            "  function extractJsonRpcFromDocument() {\n" +
+            "    try {\n" +
+            "      var bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';\n" +
+            "      if (!bodyText || bodyText.indexOf('\"jsonrpc\"') === -1) return null;\n" +
+            "      var searchKey = '{\"jsonrpc\"';\n" +
+            "      var idx = bodyText.indexOf(searchKey);\n" +
+            "      while (idx !== -1) {\n" +
+            "        var inStr = false; var quoteChar = ''; var esc = false;\n" +
+            "        var depth = 0; var end = -1;\n" +
+            "        for (var j = idx; j < bodyText.length; j++) {\n" +
+            "          var ch = bodyText.charAt(j);\n" +
+            "          if (inStr) {\n" +
+            "            if (esc) { esc = false; continue; }\n" +
+            "            if (ch === '\\\\') { esc = true; continue; }\n" +
+            "            if (ch === quoteChar) { inStr = false; continue; }\n" +
+            "            continue;\n" +
+            "          }\n" +
+            "          if (ch === '\"') { inStr = true; quoteChar = ch; continue; }\n" +
+            "          if (ch === '{') depth++;\n" +
+            "          else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }\n" +
+            "        }\n" +
+            "        if (end !== -1) {\n" +
+            "          var extracted = bodyText.substring(idx, end + 1);\n" +
+            "          if (extracted.indexOf('\"method\"') !== -1 && extracted.indexOf('\"tools/call\"') !== -1) {\n" +
+            "            // 优先 JSON.parse 验证\n" +
+            "            try {\n" +
+            "              JSON.parse(extracted);\n" +
+            "              return extracted;\n" +
+            "            } catch(e) {\n" +
+            "              // JSON.parse 失败：可能是 DeepSeek 网页渲染时把字符串值内部的 \\\" 显示为未转义的 \"\n" +
+            "              // 括号已匹配（状态机扫描通过）且包含必要字段，仍然返回原始文本\n" +
+            "              Android.log('[DEBUG][' + __rid + '] extractJsonRpc: JSON.parse失败但括号匹配，返回原始文本，长度=' + extracted.length);\n" +
+            "              return extracted;\n" +
+            "            }\n" +
+            "          }\n" +
+            "        }\n" +
+            "        idx = bodyText.indexOf(searchKey, idx + 1);\n" +
+            "      }\n" +
+            "    } catch(_e) {\n" +
+            "      Android.log('[DEBUG][' + __rid + '] extractJsonRpcFromDocument 异常: ' + _e.message);\n" +
+            "    }\n" +
+            "    return null;\n" +
+            "  }\n" +
+            "\n" +
+            "  function getAssistantReply(el) {\n" +
+            "    if (!el) return null;\n" +
+            "    var html = (el.innerHTML || '').trim();\n" +
+            "    Android.log('[DEBUG-HTML] 原始HTML长度=' + (html ? html.length : 0));\n" +
+            "    Android.log('[DEBUG-HTML] 原始HTML前200字符=' + (html ? html.substring(0, 200) : '(空)'));\n" +
+            "    var result = null;\n" +
+            "    // 优先扫描 <pre> 和 <code> 标签：DeepSeek 网页版可能把 JSON 渲染成代码块\n" +
+            "    // 这样能拿到纯净文本，避免 htmlToMarkdown 转换时丢内容或改格式\n" +
+            "    var codeEls = el.querySelectorAll('pre, code');\n" +
+            "    if (codeEls && codeEls.length > 0) {\n" +
+            "      for (var ci = 0; ci < codeEls.length; ci++) {\n" +
+            "        var codeTxt = (codeEls[ci].innerText || codeEls[ci].textContent || '').trim();\n" +
+            "        if (codeTxt && codeTxt.indexOf('\"jsonrpc\"') !== -1) {\n" +
+            "          Android.log('[DEBUG-HTML] 从 <' + codeEls[ci].tagName.toLowerCase() + '> 提取到JSON-RPC，长度=' + codeTxt.length);\n" +
+            "          result = codeTxt;\n" +
+            "          break;\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "    // 没有从代码块提取到 JSON 时，回退到 innerText（纯文本，保留原始格式）\n" +
+            "    if (!result || result.length === 0) {\n" +
+            "      var innerTxt = (el.innerText || el.textContent || '').trim();\n" +
+            "      if (innerTxt && innerTxt.indexOf('\"jsonrpc\"') !== -1) {\n" +
+            "        Android.log('[DEBUG-HTML] 使用 innerText 提取JSON-RPC，长度=' + innerTxt.length);\n" +
+            "        result = innerTxt;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    // 仍然没有 JSON 时，用 htmlToMarkdown 转换（普通文本回复路径）\n" +
+            "    if (!result || result.length === 0) {\n" +
+            "      if (html && html.length > 0) {\n" +
+            "        var md = htmlToMarkdown(html);\n" +
+            "        Android.log('[DEBUG-HTML] 转换后Markdown长度=' + (md ? md.length : 0));\n" +
+            "        Android.log('[DEBUG-HTML] 转换后Markdown前200字符=' + (md ? md.substring(0, 200) : '(空)'));\n" +
+            "        if (md && md.length > 0) {\n" +
+            "          analyzeContentStructure(el, md);\n" +
+            "          result = md;\n" +
+            "        }\n" +
+            "      }\n" +
+            "      if (!result || result.length === 0) {\n" +
+            "        result = (el.innerText || el.textContent || '').trim();\n" +
+            "        Android.log('[DEBUG-HTML] 使用备用方案innerText，长度=' + (result ? result.length : 0));\n" +
+            "      }\n" +
+            "    }\n" +
+            "    return result || null;\n" +
+            "  }\n" +
+            "\n" +
+            "  // ===== HTML到Markdown的转换函数（P3修复：JSON保护+完整JSON提取）=====\n" +
+            "  function htmlToMarkdown(html) {\n" +
+            "    if (!html) return '';\n" +
+            "    var md = html;\n" +
+            "\n" +
+            "  // ===== 第0步：检测并保护JSON区域 =====\n" +
+            "    var _protectedJson = [];\n" +
+            "    var _protectIdx = 0;\n" +
+            "    function _protectJson(text) {\n" +
+            "      if (!text || text.length === 0) return text;\n" +
+            "      if (text.indexOf('\"jsonrpc\"') === -1 && text.indexOf('\"jsonrpc\":') === -1\n" +
+            "        && text.indexOf('\"tools/call\"') === -1 && text.indexOf('\"method\"') === -1) {\n" +
+            "        return text;\n" +
+            "      }\n" +
+            "      var result = '';\n" +
+            "      var pos = 0;\n" +
+            "      while (pos < text.length) {\n" +
+            "        var braceStart = text.indexOf('{', pos);\n" +
+            "        if (braceStart === -1) { result += text.substring(pos); break; }\n" +
+            "        var inStr = false; var quoteCh = ''; var esc = false; var depth = 1; var end = -1;\n" +
+            "        for (var j = braceStart + 1; j < text.length; j++) {\n" +
+            "          var cc = text.charAt(j);\n" +
+            "          if (inStr) { if (esc) { esc = false; continue; } if (cc === '\\\\') { esc = true; continue; } if (cc === quoteCh) { inStr = false; continue; } continue; }\n" +
+            "          if (cc === '\"') { inStr = true; quoteCh = cc; continue; }\n" +
+            "          if (cc === '{') {\n" +
+            "            depth++;\n" +
+            "          } else if (cc === '}') { depth--; if (depth === 0) { end = j; break; } }\n" +
+            "        }\n" +
+            "        if (end !== -1) {\n" +
+            "          var potential = text.substring(braceStart, end + 1);\n" +
+            "          if (potential.indexOf('\"jsonrpc\"') !== -1 || potential.indexOf('\"tools/call\"') !== -1 || potential.indexOf('\"method\"') !== -1) {\n" +
+            "            var placeholder = '__JSON_PROTECTED_' + _protectIdx + '__';\n" +
+            "            _protectedJson[_protectIdx] = potential;\n" +
+            "            _protectIdx++;\n" +
+            "            result += text.substring(pos, braceStart) + placeholder;\n" +
+            "            pos = end + 1; continue;\n" +
+            "          }\n" +
+            "        }\n" +
+            "        result += text.substring(pos, braceStart + 1);\n" +
+            "        pos = braceStart + 1;\n" +
+            "      }\n" +
+            "      return result;\n" +
+            "    }\n" +
+            "    md = _protectJson(md);\n" +
+            "\n" +
+            "  // ===== 第1步：循环解码HTML实体直到稳定 =====\n" +
+            "    var _prevMd;\n" +
+            "    var _decodeIter = 0;\n" +
+            "    do {\n" +
+            "      _prevMd = md;\n" +
+            "      md = md.replace(/&amp;/g, '&');\n" +
+            "      md = md.replace(/&#(\\d+);/g, function(m, num) { return String.fromCharCode(parseInt(num, 10)); });\n" +
+            "      md = md.replace(/&#x([0-9a-fA-F]+);/g, function(m, hex) { return String.fromCharCode(parseInt(hex, 16)); });\n" +
+            "      md = md.replace(/&quot;/g, '\"');\n" +
+            "      md = md.replace(/&#39;/g, \"'\");\n" +
+            "      md = md.replace(/&lt;/g, '<');\n" +
+            "      md = md.replace(/&gt;/g, '>');\n" +
+            "      md = md.replace(/&nbsp;/g, ' ');\n" +
+            "      _decodeIter++;\n" +
+            "    } while (md !== _prevMd && _decodeIter < 5 && md.length > 0);\n" +
+            "\n" +
+            "  // ===== 第2步：转换HTML标签为Markdown =====\n" +
+            "    md = md.replace(/<\\/p>/gi, '\\n\\n');\n" +
+            "    md = md.replace(/<p[^>]*>/gi, '');\n" +
+            "    md = md.replace(/<div[^>]*>/gi, '');\n" +
+            "    md = md.replace(/<\\/div>/gi, '\\n');\n" +
+            "    md = md.replace(/<br\\s*\\/?>/gi, '\\n');\n" +
+            "    md = md.replace(/<\\/?o?ul[^>]*>/gi, '');\n" +
+            "    md = md.replace(/<li[^>]*>([\\s\\S]*?)<\\/li>/gi, '- $1\\n');\n" +
+            "    md = md.replace(/<strong[^>]*>([\\s\\S]*?)<\\/strong>/gi, '**$1**');\n" +
+            "    md = md.replace(/<b[^>]*>([\\s\\S]*?)<\\/b>/gi, '**$1**');\n" +
+            "    md = md.replace(/<em[^>]*>([\\s\\S]*?)<\\/em>/gi, '*$1*');\n" +
+            "    md = md.replace(/<i[^>]*>([\\s\\S]*?)<\\/i>/gi, '*$1*');\n" +
+            "    md = md.replace(/<h1[^>]*>([\\s\\S]*?)<\\/h1>/gi, '# $1\\n');\n" +
+            "    md = md.replace(/<h2[^>]*>([\\s\\S]*?)<\\/h2>/gi, '## $1\\n');\n" +
+            "    md = md.replace(/<h3[^>]*>([\\s\\S]*?)<\\/h3>/gi, '### $1\\n');\n" +
+            "    md = md.replace(/<h4[^>]*>([\\s\\S]*?)<\\/h4>/gi, '#### $1\\n');\n" +
+            "    md = md.replace(/<a\\s+href=\"([^\"]*)\"[^>]*>([\\s\\S]*?)<\\/a>/gi, '[$2]($1)');\n" +
+            "    // 按钮处理\n" +
+            "    md = md.replace(/<code[^>]*>(复制|下载|copy|download)<\\/code>/gi, '[**$1**]');\n" +
+            "    md = md.replace(/<button[^>]*>[\\s\\S]*?(复制|下载)[\\s\\S]*?<\\/button>/gi, '[**$1**]');\n" +
+            "    // 移除其他HTML标签\n" +
+            "    md = md.replace(/<[^>]+>/gi, '');\n" +
+            "\n" +
+            "  // ===== 第2.8步：恢复被保护的JSON内容 =====\n" +
+            "    if (_protectedJson.length > 0) {\n" +
+            "      for (var rj = 0; rj < _protectedJson.length; rj++) {\n" +
+            "        var ph = '__JSON_PROTECTED_' + rj + '__';\n" +
+            "        md = md.split(ph).join('\\n' + _protectedJson[rj] + '\\n');\n" +
+            "      }\n" +
+            "    }\n" +
+            "\n" +
+            "  // ===== 第3步：清理格式 =====\n" +
+            "    md = md.replace(/\\n{3,}/g, '\\n\\n');\n" +
+            "    md = md.trim();\n" +
+            "\n" +
+            "  // ===== 第4步：工具调用JSON检测与提取 =====\n" +
+            "    if (md.indexOf('\"jsonrpc\"') !== -1 || md.indexOf('\"jsonrpc\":') !== -1) {\n" +
+            "      var jsonIdx = md.indexOf('\"jsonrpc\"');\n" +
+            "      if (jsonIdx === -1) jsonIdx = md.indexOf('\"jsonrpc\":');\n" +
+            "      if (jsonIdx !== -1) {\n" +
+            "        var start = -1;\n" +
+            "        for (var i = jsonIdx; i >= 0; i--) { if (md.charAt(i) === '{') { start = i; break; } }\n" +
+            "        if (start !== -1) {\n" +
+            "          var inStr2 = false; var quoteChar2 = '\"'; var esc2 = false; var depth2 = 1; var end2 = -1;\n" +
+            "          for (var j = start + 1; j < md.length; j++) {\n" +
+            "            var cc2 = md.charAt(j);\n" +
+            "            if (inStr2) { if (esc2) { esc2 = false; continue; } if (cc2 === '\\\\') { esc2 = true; continue; } if (cc2 === quoteChar2) { inStr2 = false; continue; } continue; }\n" +
+            "            if (cc2 === '\"') { inStr2 = true; quoteChar2 = cc2; continue; }\n" +
+            "            if (cc2 === '{') {\n" +
+            "              depth2++;\n" +
+            "            } else if (cc2 === '}') { depth2--; if (depth2 === 0) { end2 = j; break; } }\n" +
+            "          }\n" +
+            "          if (end2 !== -1) {\n" +
+            "            var extracted = md.substring(start, end2 + 1);\n" +
+            "            return extracted;\n" +
+            "          }\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "\n" +
+            "    return md.length > 0 ? md : null;\n" +
+            "  }\n" +
+            "\n" +
+            "\n" +
+            "\n" +
+            "  // 备用全页扫描（选择器与 getAssistantMessages 同步优化）\n" +
+            "  function getAssistantReplyFallback() {\n" +
+            "    var selectors = [\n" +
+            "      '.ds-markdown.ds-assistant-message-main-content',\n" +
+            "      '.ds-markdown--block',\n" +
+            "      '.ds-assistant-message-main-content',\n" +
+            "      '[class*=\"ds-markdown\"]',\n" +
+            "      '[class*=\"ds-assistant-message\"]',\n" +
+            "      '[class*=\"assistant-message-main\"]',\n" +
+            "      '[class*=\"assistant-message\"]',\n" +
+            "      '[class*=\"markdown-content\"]',\n" +
+            "      '[class*=\"chat-message\"]',\n" +
+            "      'article',\n" +
+            "      '[role=\"article\"]'\n" +
+            "    ];\n" +
+            "    for (var si = 0; si < selectors.length; si++) {\n" +
+            "      var els = document.querySelectorAll(selectors[si]);\n" +
+            "      if (els && els.length > 0) {\n" +
+            "        var txt = getAssistantReply(els[els.length - 1]);\n" +
+            "        if (txt && txt.length > 5) return txt;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    return null;\n" +
+            "  }\n" +
+            "\n" +
+            "  var initialMsgCount = getAssistantMessages().length;\n" +
+            "  var initialLastContent = '';\n" +
+            "  if (initialMsgCount > 0) {\n" +
+            "    var initialLastEl = getAssistantMessages()[initialMsgCount - 1];\n" +
+            "    initialLastContent = getAssistantReply(initialLastEl) || '';\n" +
+            "  }\n" +
+            "  Android.log('[DEBUG][' + __rid + '] 监听启动, 初始AI消息数=' + initialMsgCount + ', 最后一条长度=' + initialLastContent.length);\n" +
+            "  // 输出前几条消息的预览，方便调试\n" +
+            "  try {\n" +
+            "    var allMsgs = getAssistantMessages();\n" +
+            "    for (var di = 0; di < Math.min(allMsgs.length, 3); di++) {\n" +
+            "      var preview = getAssistantReply(allMsgs[di]);\n" +
+            "      if (preview) preview = preview.substring(0, 50);\n" +
+            "      Android.log('[DEBUG][' + __rid + '] 消息[' + di + '] 预览: ' + preview);\n" +
+            "    }\n" +
+            "  } catch(_de) {}\n" +
+            "  var pollCount = 0;\n" +
+            "  var lastSeenText = '';\n" +
+            "  var lastReplyLen = 0;\n" +
+            "  var sameLenStable = 0;\n" +
+            "  var detectedNewMessage = false;\n" +
+            "  var finished = false;\n" +
+            "  var completionReady = false;\n" +
+            "  var completionStartTime = 0;\n" +
+            "  var lastStatusAt = 0;\n" +
+            "  // 工具调用JSON内容增长跟踪（用于辅助判断LLM是否真的停止了）\n" +
+            "  var lastJsonLen = 0;\n" +
+            "  var jsonStableCount = 0;\n" +
+            "\n" +
+            "  // ===== B. 检查最新一条 AI 消息是否有操作栏 =====\n" +
+            "  function isLatestReplyComplete(el) {\n" +
+            "    if (!el) return false;\n" +
+            "    var container = el;\n" +
+            "    for (var i = 0; i < 8 && container && container.parentElement; i++) {\n" +
+            "      if (container.querySelector && container.querySelector('.ds-button--iconLabelTertiary')) {\n" +
+            "        return true;\n" +
+            "      }\n" +
+            "      container = container.parentElement;\n" +
+            "    }\n" +
+            "    return false;\n" +
+            "  }\n" +
+            "\n" +
+            "  // ===== C. 是否仍在生成 =====\n" +
+            "  // 关键信号：.ds-button__background（生成中按钮的背景元素）= 正在生成\n" +
+            "  function isGenerating() {\n" +
+            "    // 第0步（最优先）：检测 .ds-button__background — DeepSeek生成状态核心标识\n" +
+            "    var genBg = document.querySelector('.ds-button__background');\n" +
+            "    if (genBg) return true;\n" +
+            "\n" +
+            "    // 第1步：检查 typing/loading/thinking 指示器（覆盖多语言/多样式）\n" +
+            "    var typing = document.querySelector('[class*=\"typing\"]') ||\n" +
+            "                  document.querySelector('[class*=\"loading\"]') ||\n" +
+            "                  document.querySelector('[class*=\"thinking\"]') ||\n" +
+            "                  document.querySelector('[class*=\"Thinking\"]') ||\n" +
+            "                  document.querySelector('[class*=\"thinking-block\"]') ||\n" +
+            "                  document.querySelector('[class*=\"thinking_block\"]') ||\n" +
+            "                  document.querySelector('[class*=\"ai-thinking\"]') ||\n" +
+            "                  document.querySelector('[aria-busy=\"true\"]') ||\n" +
+            "                  document.querySelector('[aria-busy=\"loading\"]') ||\n" +
+            "                  document.querySelector('[class*=\"cursor\"]') ||\n" +
+            "                  document.querySelector('[class*=\"streaming\"]');\n" +
+            "    if (typing) return true;\n" +
+            "    \n" +
+            "    // 第2步：检查所有圆形primary按钮（停止按钮 = 正在生成）\n" +
+            "    var circlePrimaryBtns = document.querySelectorAll('div[role=\"button\"][class*=\"ds-button--circle\"][class*=\"ds-button--primary\"]');\n" +
+            "    if (circlePrimaryBtns && circlePrimaryBtns.length > 0) return true;\n" +
+            "    // 同时检查非圆形的 primary 按钮（有些版本按钮 class 可能不同）\n" +
+            "    var primaryBtns = document.querySelectorAll('div[role=\"button\"][class*=\"ds-button--primary\"]');\n" +
+            "    if (primaryBtns && primaryBtns.length > 0) {\n" +
+            "      for (var ki = 0; ki < primaryBtns.length; ki++) {\n" +
+            "        var bt = primaryBtns[ki];\n" +
+            "        // 检查是否为停止/暂停按钮（文本或icon）\n" +
+            "        var t = (bt.innerText || bt.getAttribute('aria-label') || '').trim();\n" +
+            "        if (t && /停止|stop|暂停|pause|中断/.test(t)) return true;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    \n" +
+            "    // 第3步：检查SVG路径是否包含矩形/正方形图标（停止图标）\n" +
+            "    var allBtns = document.querySelectorAll('div[role=\"button\"][class*=\"ds-button--primary\"]');\n" +
+            "    for (var k2 = 0; k2 < allBtns.length; k2++) {\n" +
+            "      var b2 = allBtns[k2];\n" +
+            "      var sv = b2.querySelector('svg');\n" +
+            "      if (sv) {\n" +
+            "        // 检查多个 path（有些图标是多个 path 组成）\n" +
+            "        var paths = sv.querySelectorAll('path');\n" +
+            "        if (paths && paths.length > 0) {\n" +
+            "          for (var pIdx = 0; pIdx < paths.length; pIdx++) {\n" +
+            "            var pd = paths[pIdx].getAttribute('d') || '';\n" +
+            "            // 停止图标：正方形/矩形路径\n" +
+            "            if (pd.indexOf('M2 4.88') !== -1 ||\n" +
+            "                pd.indexOf('M 2 4.88') !== -1 ||\n" +
+            "                pd.indexOf('4.88 2') !== -1 ||\n" +
+            "                pd.indexOf('stop') !== -1 ||\n" +
+            "                pd.indexOf('rect') !== -1 ||\n" +
+            "                pd.indexOf('M0 ') !== -1) {\n" +
+            "              return true;\n" +
+            "            }\n" +
+            "          }\n" +
+            "        }\n" +
+            "        if (sv.querySelector('rect')) return true;\n" +
+            "        // 有些图标用 rect 代替 path\n" +
+            "        if (sv.querySelector('rect[height]')) return true;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    \n" +
+            "    // 第4步：检查最后一条消息末尾的文本/状态关键词\n" +
+            "    var last2 = document.querySelector('[class*=\"ds-assistant-message-main-content\"]:last-child, [class*=\"ds-markdown\"]:last-child, [class*=\"assistant-message\"]:last-child');\n" +
+            "    if (last2) {\n" +
+            "      var lt2 = (last2.innerText || last2.textContent || '').trim();\n" +
+            "      if (lt2.length > 0 && lt2.length < 80) {\n" +
+            "        if (/…|\\.{2,}|正在|思考|生成|处理|thinking|loading|typing/.test(lt2)) return true;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    \n" +
+            "    return false;\n" +
+            "  }\n" +
+            "\n" +
+            "  // 检测发送按钮是否可发送（无停止/暂停图标 = 生成已完毕）\n" +
+            "  // 关键信号：向上箭头（M8.3125开头 / L9 3.95717V15.0431 等 send-icon）= 回答完毕，可以发送\n" +
+            "  function isSendButtonReady() {\n" +
             "    var allPrimaryBtns = document.querySelectorAll('div[role=\"button\"][class*=\"ds-button--primary\"]');\n" +
             "    if (!allPrimaryBtns || allPrimaryBtns.length === 0) {\n" +
             "      // 没有找到primary按钮，检查是否有发送按钮icon（兜底）\n" +
