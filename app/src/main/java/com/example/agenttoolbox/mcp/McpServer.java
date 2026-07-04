@@ -454,7 +454,7 @@ public class McpServer {
                     if (c == quoteChar) { inString = false; continue; }
                     continue;
                 }
-                if (c == '"' || c == '\'') { inString = true; quoteChar = c; continue; }
+                if (c == '"') { inString = true; quoteChar = c; continue; }
                 if (c == '{') braceDepth++;
                 else if (c == '}') {
                     braceDepth--;
@@ -469,6 +469,8 @@ public class McpServer {
 
             String jsonStr = reply.substring(start, end + 1);
             try {
+            // Fix invalid JSON escapes (e.g. \\x27 -> single quote)
+            jsonStr = jsonStr.replace("\\'", "'");
                 return new JSONObject(jsonStr);
             } catch (Exception e) {
                 // 解析失败：可能是 DeepSeek 网页渲染破坏了字符串值内部的转义双引号
