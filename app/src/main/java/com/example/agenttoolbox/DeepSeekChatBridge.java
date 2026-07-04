@@ -844,7 +844,7 @@ public class DeepSeekChatBridge {
             "        var gen = isGenerating();\n" +
             "        if (!gen) {\n" +
             "          Android.log('[DEBUG][' + __rid + '] 全局扫描未找到完整JSON但reply包含JSON-RPC字段且LLM已停止，直接回传原始文本');\n" +
-            "          finish(reply);\n" +
+            "          if (isSendButtonReady()) { finish(reply); } else { return; }\n" +
             "          return;\n" +
             "        }\n" +
             "      }\n" +
@@ -1008,7 +1008,7 @@ public class DeepSeekChatBridge {
             "            // 回传原始JSON文本给Java端，由 fixUnescapedQuotes 修复格式问题\n" +
             "            Android.log('[DEBUG][' + __rid + '] LLM已停止生成且JSON内容不再增长（pollCount=' + pollCount + ', stableCount=' + jsonStableCount + '），回传原始文本');\n" +
             "            Android.log('[DEBUG][' + __rid + '] 最终JSON内容: ' + (jsonStr || '(空)'));\n" +
-            "            finish(jsonStr || reply);\n" +
+            "            if (isSendButtonReady()) { finish(jsonStr || reply); } else { return; }\n" +
             "          } else {\n" +
             "            Android.log('[DEBUG][' + __rid + '] UI显示已停止但内容刚停止增长，继续观察（stableCount=' + jsonStableCount + '/30）');\n" +
             "          }\n" +
