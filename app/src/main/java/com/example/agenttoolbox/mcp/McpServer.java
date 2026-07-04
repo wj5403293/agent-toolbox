@@ -782,7 +782,7 @@ public class McpServer {
                                 log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
                             }
                             
-                            log("\n[轮次 " + currentRound + "/" + maxRounds + "] ═══ 开始 ═══");
+                            log("[ROUND] " + currentRound + "/" + maxRounds + " 开始");
                             
                             log("[LLM] 发送给 LLM (" + (messageToSend == null ? 0 : messageToSend.length()) + " 字符)");
                             log("[MCP] 已完成轮数: " + (currentRound - 1) + "/" + maxRounds);
@@ -831,9 +831,9 @@ public class McpServer {
                                             if (isToolCall && !inToolCallStream.get()) {
                                                 inToolCallStream.set(true);
                                                 log("  [轮次" + currentRound + "] 【P3修复】检测到工具调用 JSON 流开始，禁用心跳 (chunk长度=" + (chunk == null ? 0 : chunk.length()) + ")");
-                                                log("    ├─ jsonrpc标记: " + (chunk.indexOf("\"jsonrpc\":") != -1 ? "✓" : "✗"));
-                                                log("    ├─ method标记: " + (chunk.indexOf("\"method\"") != -1 ? "✓" : "✗"));
-                                                log("    └─ tools/call标记: " + (chunk.indexOf("\"tools/call\"") != -1 ? "✓" : "✗"));
+                                                log("[DEBUG] jsonrpc:  + (chunk.indexOf("\"jsonrpc\":") != -1 ? "✓" : "✗"));
+                                                log("[DEBUG] method:  + (chunk.indexOf("\"method\"") != -1 ? "✓" : "✗"));
+                                                log("[DEBUG] tools/call:  + (chunk.indexOf("\"tools/call\"") != -1 ? "✓" : "✗"));
                                             }
 
                                             JSONObject j = new JSONObject();
@@ -854,11 +854,11 @@ public class McpServer {
                                     public void onDone(String reply) {
                                         try {
                                             log("[LLM] onDone");
-                                            log("    ├─ 回复长度: " + (reply == null ? 0 : reply.length()) + " 字符");
-                                            log("    ├─ 回复是否为空: " + (reply == null || reply.isEmpty() ? "是" : "否"));
+                                            log("[LLM] 长度:  + (reply == null ? 0 : reply.length()) + " 字符");
+                                            log("[LLM] 空:  + (reply == null || reply.isEmpty() ? "是" : "否"));
                                             if (reply != null && reply.length() > 0) {
-                                                log("    ├─ 回复前150字符: " + (reply.length() > 150 ? reply.substring(0, 150) + "..." : reply));
-                                                log("    └─ 回复后100字符: " + (reply.length() > 100 ? "..." + reply.substring(reply.length() - 100) : reply));
+                                                log("[LLM] 前150:  + (reply.length() > 150 ? reply.substring(0, 150) + "..." : reply));
+                                                log("[LLM] 后100:  + (reply.length() > 100 ? "..." + reply.substring(reply.length() - 100) : reply));
                                             }
                                             // 工具调用 JSON 流结束，恢复心跳
                                             if (inToolCallStream.getAndSet(false)) {
@@ -874,7 +874,7 @@ public class McpServer {
                                             // 解析 canContinue 标记（DeepSeek网页显示"继续生成"按钮）
                                             String cleanReply = reply == null ? "" : reply;
                                             boolean canContinue = false;
-                                            if (cleanReply.endsWith("\n__CAN_CONTINUE__")) {
+                                            if (cleanReply.endsWith("\n__CAN_CONTINUE__") || cleanReply.endsWith("\r\n__CAN_CONTINUE__") || cleanReply.contains("__CAN_CONTINUE__")) {
                                                 canContinue = true;
                                                 cleanReply = cleanReply.substring(0, cleanReply.length() - "__CAN_CONTINUE__".length() - 1);
                                             }
@@ -892,7 +892,7 @@ public class McpServer {
                                                             if (resultJson.has("content")) {
                                                                 String extractedContent = resultJson.getString("content");
                                                                 if (extractedContent != null && !extractedContent.isEmpty()) {
-                                                                    log("  [轮次" + currentRound + "] 提取 JSON-RPC result.content，长度=" + extractedContent.length());
+                                                                    log("[LLM] result.content:  + extractedContent.length());
                                                                     finalReply = extractedContent;
                                                                 }
                                                             }
@@ -913,9 +913,9 @@ public class McpServer {
 
                                             // P2 修复：记录 LLM 完整回复（非工具调用时），使用截断防止过长日志
                                             if (!isToolCall && finalReply.length() > 0) {
-                                                log("  [轮次" + currentRound + "] LLM最终回复结构: " + analyzeReplyStructure(finalReply));
+                                                log("[LLM] 结构:  + analyzeReplyStructure(finalReply));
                                                 String logReply = finalReply;
-                                                log("  [轮次" + currentRound + "] LLM最终回复内容: " + logReply);
+                                                log("[LLM] 内容:  + logReply);
                                             }
                                             JSONObject j = new JSONObject();
                                             j.put("content", finalReply);
@@ -992,9 +992,13 @@ public class McpServer {
 
                             String reply = roundReplyRef.get();
                             if (reply == null || reply.isEmpty()) {
-                                log("  [轮次" + currentRound + "] 回复为空，结束对话");
-                                // 空回复：不继续轮询，结束对话
+                                log("[ROUND] 回复为空，结束对话");
                                 break;
+                            }
+                            // 剥离 __CAN_CONTINUE__ 标记
+                            if (reply.contains("__CAN_CONTINUE__")) {
+                                reply = reply.replace("\r\n__CAN_CONTINUE__", "").replace("\n__CAN_CONTINUE__", "").replace("__CAN_CONTINUE__", "");
+                                log("[LLM] 已剥离 __CAN_CONTINUE__ 标记");
                             }
                             log("[LLM] 回复长度=" + reply.length() + " 字符");
 
