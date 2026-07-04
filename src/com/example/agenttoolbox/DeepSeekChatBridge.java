@@ -834,8 +834,19 @@ public class DeepSeekChatBridge {
             "    if (!reply || reply.indexOf('\"method\"') === -1 || reply.indexOf('\"tools/call\"') === -1) {\n" +
             "      var globalJson = extractJsonRpcFromDocument();\n" +
             "      if (globalJson) {\n" +
-            "        Android.log('[DEBUG][' + __rid + '] 全局扫描提取到完整JSON-RPC，长度=' + globalJson.length + '，覆盖reply');\n" +
-            "        reply = globalJson;\n" +
+            "        Android.log('[DEBUG][' + __rid + '] 全局扫描提取到完整JSON-RPC，长度=' + globalJson.length + '，立即完成');\n" +
+            "        finish(globalJson);\n" +
+            "        return;\n" +
+            "      }\n" +
+            "      // 如果全局扫描也返回null，但reply有jsonrpc+method+params\n" +
+            "      // 可能是LLM已停止但JSON在innerText中不完整，直接回传原始文本\n" +
+            "      if (reply && reply.indexOf('\"jsonrpc\"') !== -1 && reply.indexOf('\"method\"') !== -1 && reply.indexOf('\"params\"') !== -1) {\n" +
+            "        var gen = isGenerating();\n" +
+            "        if (!gen) {\n" +
+            "          Android.log('[DEBUG][' + __rid + '] 全局扫描未找到完整JSON但reply包含JSON-RPC字段且LLM已停止，直接回传原始文本');\n" +
+            "          finish(reply);\n" +
+            "          return;\n" +
+            "        }\n" +
             "      }\n" +
             "    }\n" +
             "    // 强制扫描 <pre> 代码块：当存在 <pre> 标签时，提取纯净的 JSON 替换混合内容\n" +
@@ -875,11 +886,16 @@ public class DeepSeekChatBridge {
             "\n" +
             "    // ========== 工具调用优先检测 ==========\n" +
             "    // 精确匹配：必须同时包含 method 和 tools/call 才是工具调用\n" +
+            "    // 宽松匹配：包含 jsonrpc + method + params 也视为工具调用（流式渲染中 tools/call 可能被截断）\n" +
             "    var isToolCall = false;\n" +
             "    if (typeof reply === 'string') {\n" +
-            "      var hasMethod = reply.indexOf('method') !== -1;\n" +
-            "      var hasToolsCall = reply.indexOf('tools/call') !== -1;\n" +
-            "      isToolCall = hasMethod && hasToolsCall;\n" +
+            "      var hasJsonRpc = reply.indexOf('\"jsonrpc\"') !== -1;\n" +
+            "      var hasMethod = reply.indexOf('\"method\"') !== -1;\n" +
+            "      var hasToolsCall = reply.indexOf('\"tools/call\"') !== -1;\n" +
+            "      var hasParams = reply.indexOf('\"params\"') !== -1;\n" +
+            "      // 精确：method + tools/call\n" +
+            "      // 宽松：jsonrpc + method + params（用于流式渲染中 tools/call 被截断的情况）\n" +
+            "      isToolCall = (hasMethod && hasToolsCall) || (hasJsonRpc && hasMethod && hasParams);\n" +
             "    }\n" +
             "\n" +
             "    if (isToolCall) {\n" +
@@ -979,14 +995,11 @@ public class DeepSeekChatBridge {
             "          // UI显示已停止 且 内容停止增长 = 大概率真的停止了\n" +
             "          // 但为了保险，再等几轮确认（防止瞬时波动）\n" +
             "          if (jsonStableCount >= 30) {\n" +
-            "            // 连续30轮（约15秒）内容没有增长，才认为真的停止了\n" +
-            "            // 给LLM足够的思考时间，避免工具调用思考阶段的短暂停顿被误判为停止\n" +
-            "            Android.log('[DEBUG][' + __rid + '] ERROR: LLM已停止生成且JSON内容不再增长（pollCount=' + pollCount + ', stableCount=' + jsonStableCount + '）');\n" +
-            "            Android.log('[DEBUG][' + __rid + '] ERROR-最终JSON内容: ' + (jsonStr || '(空)'));\n" +
-            "            Android.onDeepSeekError(__rid, '工具调用JSON不完整（LLM已停止生成）');\n" +
-            "            if (window[__prefix + 'poll']) clearInterval(window[__prefix + 'poll']);\n" +
-            "            if (window[__prefix + 'obs']) { try { window[__prefix + 'obs'].disconnect(); } catch(_e) {} }\n" +
-            "            finished = true;\n" +
+            "            // 连续30轮（约15秒）内容没有增长，LLM已停止生成\n" +
+            "            // 回传原始JSON文本给Java端，由 fixUnescapedQuotes 修复格式问题\n" +
+            "            Android.log('[DEBUG][' + __rid + '] LLM已停止生成且JSON内容不再增长（pollCount=' + pollCount + ', stableCount=' + jsonStableCount + '），回传原始文本');\n" +
+            "            Android.log('[DEBUG][' + __rid + '] 最终JSON内容: ' + (jsonStr || '(空)'));\n" +
+            "            finish(jsonStr || reply);\n" +
             "          } else {\n" +
             "            Android.log('[DEBUG][' + __rid + '] UI显示已停止但内容刚停止增长，继续观察（stableCount=' + jsonStableCount + '/30）');\n" +
             "          }\n" +
