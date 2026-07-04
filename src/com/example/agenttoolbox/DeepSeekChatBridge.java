@@ -343,10 +343,16 @@ public class DeepSeekChatBridge {
             "        if (end !== -1) {\n" +
             "          var extracted = bodyText.substring(idx, end + 1);\n" +
             "          if (extracted.indexOf('\"method\"') !== -1 && extracted.indexOf('\"tools/call\"') !== -1) {\n" +
+            "            // 优先 JSON.parse 验证\n" +
             "            try {\n" +
             "              JSON.parse(extracted);\n" +
             "              return extracted;\n" +
-            "            } catch(e) { /* JSON 无效，继续查找下一个 */ }\n" +
+            "            } catch(e) {\n" +
+            "              // JSON.parse 失败：可能是 DeepSeek 网页渲染时把字符串值内部的 \\\" 显示为未转义的 \"\n" +
+            "              // 括号已匹配（状态机扫描通过）且包含必要字段，仍然返回原始文本\n" +
+            "              Android.log('[DEBUG][' + __rid + '] extractJsonRpc: JSON.parse失败但括号匹配，返回原始文本，长度=' + extracted.length);\n" +
+            "              return extracted;\n" +
+            "            }\n" +
             "          }\n" +
             "        }\n" +
             "        idx = bodyText.indexOf(searchKey, idx + 1);\n" +
@@ -922,6 +928,12 @@ public class DeepSeekChatBridge {
             "              jsonStr = robustCompleteAttempt;\n" +
             "              jsonComplete = true;\n" +
             "            } catch(e) { /* 补全后仍失败，继续等待流式下一批 */ }\n" +
+            "          } else {\n" +
+            "            // 括号已匹配（suffix为空）但 JSON.parse 失败\n" +
+            "            // 可能是 DeepSeek 网页渲染破坏了字符串值内部的转义双引号\n" +
+            "            // 只要括号匹配且包含必要字段，就认为完成，回传原始文本\n" +
+            "            Android.log('[DEBUG][' + __rid + '] JSON.parse失败但括号匹配(suffix=0)，强制完成，长度=' + jsonStr.length);\n" +
+            "            jsonComplete = true;\n" +
             "          }\n" +
             "        }\n" +
             "      }\n" +

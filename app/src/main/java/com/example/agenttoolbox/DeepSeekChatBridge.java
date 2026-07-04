@@ -317,6 +317,52 @@ public class DeepSeekChatBridge {
             "    } catch (_se) { Android.log('[DEBUG-STRUCT] 分析异常: ' + _se.message); }\n" +
             "  }\n" +
             "\n" +
+            "  // 全局 JSON-RPC 扫描：直接从整个文档提取完整的 JSON-RPC 内容\n" +
+            "  // 用于应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
+            "  function extractJsonRpcFromDocument() {\n" +
+            "    try {\n" +
+            "      var bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';\n" +
+            "      if (!bodyText || bodyText.indexOf('\"jsonrpc\"') === -1) return null;\n" +
+            "      var searchKey = '{\"jsonrpc\"';\n" +
+            "      var idx = bodyText.indexOf(searchKey);\n" +
+            "      while (idx !== -1) {\n" +
+            "        var inStr = false; var quoteChar = ''; var esc = false;\n" +
+            "        var depth = 0; var end = -1;\n" +
+            "        for (var j = idx; j < bodyText.length; j++) {\n" +
+            "          var ch = bodyText.charAt(j);\n" +
+            "          if (inStr) {\n" +
+            "            if (esc) { esc = false; continue; }\n" +
+            "            if (ch === '\\\\') { esc = true; continue; }\n" +
+            "            if (ch === quoteChar) { inStr = false; continue; }\n" +
+            "            continue;\n" +
+            "          }\n" +
+            "          if (ch === '\"') { inStr = true; quoteChar = ch; continue; }\n" +
+            "          if (ch === '{') depth++;\n" +
+            "          else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }\n" +
+            "        }\n" +
+            "        if (end !== -1) {\n" +
+            "          var extracted = bodyText.substring(idx, end + 1);\n" +
+            "          if (extracted.indexOf('\"method\"') !== -1 && extracted.indexOf('\"tools/call\"') !== -1) {\n" +
+            "            // 优先 JSON.parse 验证\n" +
+            "            try {\n" +
+            "              JSON.parse(extracted);\n" +
+            "              return extracted;\n" +
+            "            } catch(e) {\n" +
+            "              // JSON.parse 失败：可能是 DeepSeek 网页渲染时把字符串值内部的 \\\" 显示为未转义的 \"\n" +
+            "              // 括号已匹配（状态机扫描通过）且包含必要字段，仍然返回原始文本\n" +
+            "              Android.log('[DEBUG][' + __rid + '] extractJsonRpc: JSON.parse失败但括号匹配，返回原始文本，长度=' + extracted.length);\n" +
+            "              return extracted;\n" +
+            "            }\n" +
+            "          }\n" +
+            "        }\n" +
+            "        idx = bodyText.indexOf(searchKey, idx + 1);\n" +
+            "      }\n" +
+            "    } catch(_e) {\n" +
+            "      Android.log('[DEBUG][' + __rid + '] extractJsonRpcFromDocument 异常: ' + _e.message);\n" +
+            "    }\n" +
+            "    return null;\n" +
+            "  }\n" +
+            "\n" +
             "  function getAssistantReply(el) {\n" +
             "    if (!el) return null;\n" +
             "    var html = (el.innerHTML || '').trim();\n" +
@@ -783,6 +829,15 @@ public class DeepSeekChatBridge {
             "    // 直接取最后一条AI消息，始终跟踪最新内容\n" +
             "    var latestEl = list[list.length - 1];\n" +
             "    var reply = getAssistantReply(latestEl);\n" +
+            "    // 全局 JSON-RPC 扫描：如果 reply 不完整或为空，尝试从整个文档提取完整 JSON\n" +
+            "    // 应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
+            "    if (!reply || reply.indexOf('\"method\"') === -1 || reply.indexOf('\"tools/call\"') === -1) {\n" +
+            "      var globalJson = extractJsonRpcFromDocument();\n" +
+            "      if (globalJson) {\n" +
+            "        Android.log('[DEBUG][' + __rid + '] 全局扫描提取到完整JSON-RPC，长度=' + globalJson.length + '，覆盖reply');\n" +
+            "        reply = globalJson;\n" +
+            "      }\n" +
+            "    }\n" +
             "    // 强制扫描 <pre> 代码块：当存在 <pre> 标签时，提取纯净的 JSON 替换混合内容\n" +
             "    var preEls = latestEl.querySelectorAll('pre');\n" +
             "    if (preEls && preEls.length > 0) {\n" +
@@ -873,6 +928,12 @@ public class DeepSeekChatBridge {
             "              jsonStr = robustCompleteAttempt;\n" +
             "              jsonComplete = true;\n" +
             "            } catch(e) { /* 补全后仍失败，继续等待流式下一批 */ }\n" +
+            "          } else {\n" +
+            "            // 括号已匹配（suffix为空）但 JSON.parse 失败\n" +
+            "            // 可能是 DeepSeek 网页渲染破坏了字符串值内部的转义双引号\n" +
+            "            // 只要括号匹配且包含必要字段，就认为完成，回传原始文本\n" +
+            "            Android.log('[DEBUG][' + __rid + '] JSON.parse失败但括号匹配(suffix=0)，强制完成，长度=' + jsonStr.length);\n" +
+            "            jsonComplete = true;\n" +
             "          }\n" +
             "        }\n" +
             "      }\n" +

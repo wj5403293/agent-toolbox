@@ -471,8 +471,81 @@ public class McpServer {
             try {
                 return new JSONObject(jsonStr);
             } catch (Exception e) {
+                // 解析失败：可能是 DeepSeek 网页渲染破坏了字符串值内部的转义双引号
+                // 尝试修复未转义的双引号后重试
+                String fixed = fixUnescapedQuotes(jsonStr);
+                if (!fixed.equals(jsonStr)) {
+                    try {
+                        JSONObject fixedJson = new JSONObject(fixed);
+                        android.util.Log.d("McpServer", "extractJsonObject: 修复未转义双引号后解析成功");
+                        return fixedJson;
+                    } catch (Exception e2) {
+                        android.util.Log.w("McpServer", "extractJsonObject: 修复后仍解析失败: " + e2.getMessage());
+                    }
+                }
                 return null;
             }
+        }
+
+        /**
+         * 修复 JSON 字符串值内部未转义的双引号。
+         * DeepSeek 网页渲染时可能把 JSON 字符串值中的 \" 显示为未转义的 "，
+         * 导致 JSONObject 解析失败。
+         *
+         * 算法：在字符串值内部遇到 " 时，检查后面（跳过空白）是否是 JSON 结构字符
+         * (, } ] :)。如果不是，认为这是字符串内部的未转义双引号，插入 \ 转义。
+         */
+        private String fixUnescapedQuotes(String jsonStr) {
+            StringBuilder sb = new StringBuilder(jsonStr.length() + 32);
+            boolean inString = false;
+            char quoteChar = '"';
+            boolean escape = false;
+
+            for (int i = 0; i < jsonStr.length(); i++) {
+                char c = jsonStr.charAt(i);
+
+                if (inString) {
+                    if (escape) {
+                        escape = false;
+                        sb.append(c);
+                        continue;
+                    }
+                    if (c == '\\') {
+                        escape = true;
+                        sb.append(c);
+                        continue;
+                    }
+                    if (c == quoteChar) {
+                        // 检查后面（跳过空白）是否是 JSON 结构字符
+                        int j = i + 1;
+                        while (j < jsonStr.length() && Character.isWhitespace(jsonStr.charAt(j))) {
+                            j++;
+                        }
+                        if (j < jsonStr.length()) {
+                            char next = jsonStr.charAt(j);
+                            if (next == ',' || next == '}' || next == ']' || next == ':') {
+                                // 字符串正常结束
+                                inString = false;
+                                sb.append(c);
+                                continue;
+                            }
+                        }
+                        // 字符串内部的未转义双引号，转义它
+                        sb.append('\\').append(c);
+                        continue;
+                    }
+                    sb.append(c);
+                    continue;
+                }
+
+                if (c == '"' || c == '\'') {
+                    inString = true;
+                    quoteChar = c;
+                }
+                sb.append(c);
+            }
+
+            return sb.toString();
         }
 
         /**

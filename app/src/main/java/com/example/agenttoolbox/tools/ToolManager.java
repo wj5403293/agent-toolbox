@@ -146,7 +146,6 @@ public class ToolManager {
             rules.put("file_write 的 content 参数会自动剥离行号前缀，可以直接把 file_read 的输出当 content 传入");
             rules.put("Python 工具已内嵌 Python 3.14 环境，直接调用 python 工具即可执行代码，无需通过 shell 检查 Python 是否可用");
             rules.put("执行 Python 代码时直接使用 python 工具，不要用 shell which python 或 shell python3 等方式");
-            rules.put("禁止代替工具返回错误。你必须通过 method=tools/call 调用工具，让工具自己返回结果或错误。不要自己编造工具执行结果");
             prompt.put("rules", rules);
 
             // 文件操作最佳实践
