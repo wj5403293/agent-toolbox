@@ -797,6 +797,17 @@ public class McpServer {
                             log("[FSM] 任务类型: " + detectedType);
                         }
 
+                        // 待办计划：检测是否需要生成任务计划
+                        if (cachedSession != null) {
+                            TaskManager tm = cachedSession.taskManager;
+                            if (tm.shouldGeneratePlan(message, cachedSession.planState.tasks.isEmpty() ? 0 : 3)) {
+                                log("[PLAN] 触发计划生成，向LLM注入规划提示词");
+                                String planPrompt = tm.generatePlanPrompt(message);
+                                // 将规划提示词拼接到用户消息中
+                                currentMessage = planPrompt;
+                            }
+                        }
+
                         while (round < maxRounds && !finalDone) {
                             round++;
                             final int currentRound = round;
@@ -1148,6 +1159,21 @@ public class McpServer {
                                 updateFsmState(cachedSession, toolNameForLog, toolResult);
                             }
 
+                            // 待办计划：更新任务进度
+                            if (cachedSession != null && !toolIsError) {
+                                TaskManager tm = cachedSession.taskManager;
+                                // 如果有活跃任务，标记完成
+                                if (cachedSession.planState.activeTask != null) {
+                                    tm.markCurrentDone(cachedSession.planState);
+                                    log("[PLAN] " + cachedSession.planState.getSummary());
+                                }
+                                // 选取下一个任务
+                                Task nextTask = tm.selectNextTask(cachedSession.planState);
+                                if (nextTask != null) {
+                                    log("[PLAN] 下一任务: [" + nextTask.taskId + "] " + nextTask.content);
+                                }
+                            }
+
                             // FSM 自动下一步：文件读写流程中，读完后自动触发写操作
                             JSONObject autoNextStep = getFsmAutoNextStep(cachedSession, conversationId, toolNameForLog);
                             if (autoNextStep != null) {
@@ -1202,6 +1228,26 @@ public class McpServer {
 
                             log("[ROUND] 准备下一轮");
 
+                            // 待办计划：轮次刷新检查
+                            if (cachedSession != null) {
+                                cachedSession.planState.incrementRound();
+                                if (cachedSession.planState.needsRefresh()) {
+                                    log("[PLAN] 轮次计数=" + cachedSession.planState.roundsSinceUpdate + "，触发计划刷新提醒");
+                                    // 在下一轮消息中注入计划进度
+                                    String planStatus = cachedSession.planState.toPromptText();
+                                    currentMessage = planStatus + "\n\n[系统指令] 请根据任务进度继续执行，如需要调整计划请更新待办清单。\n\n" + currentMessage;
+                                    cachedSession.planState.resetRoundCount();
+                                }
+                                // 检查是否全部完成
+                                if (cachedSession.planState.allCompleted()) {
+                                    log("[PLAN] 所有任务已完成！");
+                                    String summary = cachedSession.taskManager.generateSummary(cachedSession.planState);
+                                    finalDone = true;
+                                    // 附加总结到最终消息
+                                    currentMessage = currentMessage + "\n\n" + summary;
+                                }
+                            }
+
                             // SSE status 通知（JSON-RPC notification 风格）
                             JSONObject status = new JSONObject();
                             status.put("jsonrpc", "2.0");
@@ -1214,6 +1260,15 @@ public class McpServer {
                             statusParams.put("result", toolResult);
                             statusParams.put("isError", toolIsError);
                             statusParams.put("round", currentRound);
+                            // 待办计划进度
+                            if (cachedSession != null && !cachedSession.planState.tasks.isEmpty()) {
+                                statusParams.put("plan", new JSONObject()
+                                    .put("total", cachedSession.planState.totalTasks())
+                                    .put("completed", cachedSession.planState.completedTasks())
+                                    .put("failed", cachedSession.planState.failedTasks())
+                                    .put("summary", cachedSession.planState.getSummary())
+                                );
+                            }
                             status.put("params", statusParams);
                             writeEventChunk(out, "status", status.toString());
                         }

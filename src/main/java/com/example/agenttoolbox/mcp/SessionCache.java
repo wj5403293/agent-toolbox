@@ -104,6 +104,10 @@ public class SessionCache {
         public final PythonWorkflow pythonWorkflow = new PythonWorkflow();
         public final ShellWorkflow shellWorkflow = new ShellWorkflow();
 
+        // 待办计划系统
+        public final PlanState planState = new PlanState();
+        public final TaskManager taskManager = TaskManager.getInstance();
+
         public SessionData() {}
 
         public SessionData(String systemPrompt, JSONArray toolsList, JSONObject systemObj) {
