@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
 
     
     private McpServer mcpServer;
-    private Handler handler;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private Deque<String> logDeque = new LinkedList<>();
     private static final int MAX_LOGS = 1000;  // 最多保存1000条日志
     
@@ -54,8 +54,6 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        handler = new Handler(Looper.getMainLooper());
 
         // 初始化视图
         tvStatus = (TextView) findViewById(R.id.tvStatus);

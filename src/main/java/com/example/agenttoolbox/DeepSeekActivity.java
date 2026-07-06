@@ -40,7 +40,7 @@ public class DeepSeekActivity extends Activity {
     private Button btnRefresh;
     private Button btnExtractHtml;
 
-    private Handler handler;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean isLoggedIn = false;
     private JavaScriptBridge jsBridge;
     private boolean isPageLoaded = false; // 页面是否已加载完成
@@ -53,8 +53,6 @@ public class DeepSeekActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_deepseek);
-
-        handler = new Handler(Looper.getMainLooper());
 
         // 初始化视图（不含 WebView，WebView 从 Bridge 全局单例取）
         initViews();

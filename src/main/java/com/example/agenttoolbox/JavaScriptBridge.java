@@ -21,7 +21,7 @@ public class JavaScriptBridge {
     
     private Context context;
     private WebView webView;
-    private Handler handler;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private OnToolCallListener listener;
     
     public interface OnToolCallListener {
@@ -33,7 +33,6 @@ public class JavaScriptBridge {
     public JavaScriptBridge(Context context, WebView webView) {
         this.context = context;
         this.webView = webView;
-        this.handler = new Handler(Looper.getMainLooper());
     }
     
     public void setOnToolCallListener(OnToolCallListener listener) {
