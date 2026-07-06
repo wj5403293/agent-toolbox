@@ -256,6 +256,7 @@ public class DeepSeekChatBridge {
             "  var pollCount = 0;\n" +
             "  var lastTextLen = 0;\n" +
             "  var stableCount = 0;\n" +
+            "  var initialMsgCount = getAssistantMessages().length;\n" +
             "\n" +
             "  // ===== Helper Functions =====\n" +
             "  function getAssistantMessages() {\n" +
@@ -308,7 +309,7 @@ public class DeepSeekChatBridge {
             "\n" +
             "    // Step 4: Collect last AI message text\n" +
             "    var list = getAssistantMessages();\n" +
-            "    if (list.length === 0) return;\n" +
+            "    if (list.length <= initialMsgCount) return;\n" +
             "    var lastEl = list[list.length - 1];\n" +
             "    var rawText = (lastEl.innerText || lastEl.textContent || '').trim();\n" +
             "    if (!rawText || rawText.length < 2) return;\n" +
