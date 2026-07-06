@@ -23,7 +23,7 @@ android {
             manifest.srcFile 'AndroidManifest.xml'
             res.srcDirs = ['res']
             assets.srcDirs = ['assets']
-            jniLibs.srcDirs = ['app/src/main/jniLibs']
+            jniLibs.srcDirs = ['jniLibs']
         }
     }
 
