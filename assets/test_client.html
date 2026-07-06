@@ -972,45 +972,36 @@
         }
         .plan-task-status {
             flex-shrink: 0;
-            width: 20px;
-            height: 20px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: 700;
-            margin-top: 1px;
+            margin-top: 3px;
+            box-sizing: border-box;
         }
         .plan-task-status.pending {
-            background: #f1f5f9;
-            color: #94a3b8;
-            border: 1.5px solid #cbd5e1;
+            background: transparent;
+            border: 2px solid #cbd5e1;
         }
         .plan-task-status.in_progress {
-            background: #dbeafe;
-            color: #2563eb;
-            border: 1.5px solid #93c5fd;
+            background: #3b82f6;
+            border: 2px solid #3b82f6;
             animation: pulse-status 1.5s ease-in-out infinite;
         }
         .plan-task-status.completed {
-            background: #dcfce7;
-            color: #16a34a;
-            border: 1.5px solid #86efac;
+            background: #22c55e;
+            border: 2px solid #22c55e;
         }
         .plan-task-status.failed {
-            background: #fee2e2;
-            color: #dc2626;
-            border: 1.5px solid #fca5a5;
+            background: #ef4444;
+            border: 2px solid #ef4444;
         }
         .plan-task-status.paused {
-            background: #fef3c7;
-            color: #d97706;
-            border: 1.5px solid #fcd34d;
+            background: #f59e0b;
+            border: 2px solid #f59e0b;
         }
         @keyframes pulse-status {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.3); }
-            50% { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0); }
+            0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
         }
         .plan-task-body {
             flex: 1;
@@ -1498,18 +1489,17 @@
         }
 
         function renderPlanTask(t) {
-            var statusIcon = '';
             var statusLabel = '';
             switch (t.status) {
-                case 'completed': statusIcon = '✓'; statusLabel = 'completed'; break;
-                case 'in_progress': statusIcon = '▶'; statusLabel = 'in_progress'; break;
-                case 'failed': statusIcon = '✗'; statusLabel = 'failed'; break;
-                case 'paused': statusIcon = '⏸'; statusLabel = 'paused'; break;
-                default: statusIcon = '○'; statusLabel = 'pending'; break;
+                case 'completed': statusLabel = 'completed'; break;
+                case 'in_progress': statusLabel = 'in_progress'; break;
+                case 'failed': statusLabel = 'failed'; break;
+                case 'paused': statusLabel = 'paused'; break;
+                default: statusLabel = 'pending'; break;
             }
 
             var html = '<div class="plan-task-item">';
-            html += '<div class="plan-task-status ' + statusLabel + '">' + statusIcon + '</div>';
+            html += '<div class="plan-task-status ' + statusLabel + '"></div>';
             html += '<div class="plan-task-body">';
             html += '<div class="plan-task-content">' + escapeHtml(t.content || t.task_id || '') + '</div>';
             html += '<div class="plan-task-meta">';
