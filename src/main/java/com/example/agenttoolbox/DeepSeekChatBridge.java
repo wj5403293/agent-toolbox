@@ -257,9 +257,16 @@ public class DeepSeekChatBridge {
             "  var pollCount = 0;\n" +
             "  var lastTextLen = 0;\n" +
             "  var stableCount = 0;\n" +
-            "  // 记录发送前已有的 AI 回复数（baseline）\n" +
-            "  var initialAiCount = document.querySelectorAll('.ds-assistant-message-main-content').length;\n" +
-            "  Android.log('[JS] 初始AI回复数=' + initialAiCount + ', url=' + window.location.href);\n" +
+            "  // 记录发送前已有的 AI 回复数（baseline）和最后一个 AI 元素文本长度\n" +
+            "  // DeepSeek 行为：替换最后一个 AI 元素内容而非新增元素，所以需要同时检测内容变化\n" +
+            "  var diagInitial = document.querySelectorAll('.ds-assistant-message-main-content');\n" +
+            "  var initialAiCount = diagInitial.length;\n" +
+            "  var initialLastAiLen = 0;\n" +
+            "  if (initialAiCount > 0) {\n" +
+            "    var lastAiInit = diagInitial[initialAiCount - 1];\n" +
+            "    initialLastAiLen = (lastAiInit.innerText || lastAiInit.textContent || '').trim().length;\n" +
+            "  }\n" +
+            "  Android.log('[JS] 初始AI回复数=' + initialAiCount + ', initialLastAiLen=' + initialLastAiLen + ', url=' + window.location.href);\n" +
             "  // 选择器探测：输出多种可能选择器的匹配数，定位正确的 AI 回复元素\n" +
             "  var probeSelectors = [\n" +
             "    '.ds-assistant-message-main-content',\n" +
@@ -355,7 +362,13 @@ public class DeepSeekChatBridge {
             "        var dt = (diagAiMsgs[dp].innerText || diagAiMsgs[dp].textContent || '').trim();\n" +
             "        previews.push('[' + dp + ']len=' + dt.length + ':' + dt.substring(0, 30).replace(/\\n/g, ' '));\n" +
             "      }\n" +
-            "      Android.log('[JS] 诊断 poll#' + pollCount + ' ready=' + diagReady + ' aiCount=' + diagAiMsgs.length + '/' + initialAiCount + ' stable=' + stableCount + ' lastLen=' + lastTextLen + ' | ' + previews.join(' || '));\n" +
+            "      // 也输出当前最后一个元素长度，对比 initialLastAiLen\n" +
+            "      var diagCurLen = 0;\n" +
+            "      if (diagAiMsgs.length > 0) {\n" +
+            "        var diagLast = diagAiMsgs[diagAiMsgs.length - 1];\n" +
+            "        diagCurLen = (diagLast.innerText || diagLast.textContent || '').trim().length;\n" +
+            "      }\n" +
+            "      Android.log('[JS] 诊断 poll#' + pollCount + ' ready=' + diagReady + ' aiCount=' + diagAiMsgs.length + '/' + initialAiCount + ' initLastLen=' + initialLastAiLen + ' curLastLen=' + diagCurLen + ' stable=' + stableCount + ' lastLen=' + lastTextLen + ' | ' + previews.join(' || '));\n" +
             "    }\n" +
             "\n" +
             "    // 快速跳过：若检测到停止按钮（LLM 生成中），本轮直接返回\n" +
@@ -363,8 +376,19 @@ public class DeepSeekChatBridge {
             "    if (!isSendButtonReady()) return;\n" +
             "\n" +
             "    // 检查是否有新的 AI 回复\n" +
+            "    // DeepSeek 替换最后一个 AI 元素内容而非新增元素，需同时检测元素数和内容变化\n" +
             "    var aiMsgs = document.querySelectorAll('.ds-assistant-message-main-content');\n" +
-            "    if (aiMsgs.length <= initialAiCount) return;\n" +
+            "    var hasNewContent = false;\n" +
+            "    if (aiMsgs.length > initialAiCount) {\n" +
+            "      hasNewContent = true;  // 新增了 AI 元素\n" +
+            "    } else if (aiMsgs.length > 0) {\n" +
+            "      var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
+            "      var currentLen = (lastAi.innerText || lastAi.textContent || '').trim().length;\n" +
+            "      if (currentLen > initialLastAiLen) {\n" +
+            "        hasNewContent = true;  // 最后一个元素内容变化（替换/增长）\n" +
+            "      }\n" +
+            "    }\n" +
+            "    if (!hasNewContent) return;\n" +
             "\n" +
             "    // 取最新的 AI 回复元素\n" +
             "    var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
