@@ -186,7 +186,8 @@ public class MainActivity extends Activity {
                 appendLog("通知权限被拒绝，但继续启动服务");
             }
             // 延迟一点再启动，让权限对话框完全关闭
-            handler.postDelayed(new Runnable() {
+            final Handler h2 = handler;
+            h2.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     startServer();
@@ -220,10 +221,11 @@ public class MainActivity extends Activity {
 
             mcpServer = new McpServer(PORT, MainActivity.this);
             // 初始化统一日志门面（同时输出到 UI 和 logcat）
+            final Handler h = handler;
             AppLogger.init(new AppLogger.OnLogListener() {
                 @Override
                 public void onLog(String message) {
-                    handler.post(new Runnable() {
+                    h.post(new Runnable() {
                         @Override
                         public void run() {
                             appendLog(message);
@@ -234,7 +236,7 @@ public class MainActivity extends Activity {
             mcpServer.setOnLogListener(new McpServer.OnLogListener() {
                 @Override
                 public void onLog(final String message) {
-                    handler.post(new Runnable() {
+                    h.post(new Runnable() {
                         @Override
                         public void run() {
                             appendLog(message);
