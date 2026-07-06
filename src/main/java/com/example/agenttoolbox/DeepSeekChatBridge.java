@@ -275,7 +275,7 @@ public class DeepSeekChatBridge {
             "    if (finished) return;\n" +
             "    finished = true;\n" +
             "    if (window[__prefix + 'poll']) clearInterval(window[__prefix + 'poll']);\n" +
-            "    Android.log('[JS] 完成: 长度=' + (reply ? reply.length : 0) + '\n' + (reply || ''));\n" +
+            "    Android.log('[JS] 完成: 长度=' + (reply ? reply.length : 0) + '\\n' + (reply || ''));\n" +
             "    Android.onDeepSeekReply(__rid, reply || '');\n" +
             "  }\n" +
             "\n" +
