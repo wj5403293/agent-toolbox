@@ -831,14 +831,14 @@ public class DeepSeekChatBridge {
             "    var reply = getAssistantReply(latestEl);\n" +
             "    // 全局 JSON-RPC 扫描：如果 reply 不完整或为空，尝试从整个文档提取完整 JSON\n" +
             "    // 应对流式渲染过程中 DOM 被拆分，getAssistantReply 只能提取到片段的情况\n" +
-            "    if (!reply || reply.indexOf('\"method\"') === -1 || reply.indexOf('\"tools/call\"') === -1) {\n" +
+            "    if (!reply || reply.trim().length === 0) {\n" +
             "      var globalJson = extractJsonRpcFromDocument();\n" +
             "      if (globalJson) {\n" +
             "        Android.log('[DEBUG][' + __rid + '] 全局扫描提取到完整JSON-RPC，长度=' + globalJson.length + '，立即完成');\n" +
             "        finish(globalJson);\n" +
             "        return;\n" +
             "      }\n" +
-            "      // 如果全局扫描也返回null，但reply有jsonrpc+method+params\n" +
+            "      // 如果全局扫描也返回null，但reply有jsonrpc+method+params（流式渲染截断场景）\n" +
             "      // 可能是LLM已停止但JSON在innerText中不完整，直接回传原始文本\n" +
             "      if (reply && reply.indexOf('\"jsonrpc\"') !== -1 && reply.indexOf('\"method\"') !== -1 && reply.indexOf('\"params\"') !== -1) {\n" +
             "        var gen = isGenerating();\n" +
