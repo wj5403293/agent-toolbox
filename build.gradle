@@ -37,3 +37,13 @@ android {
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
 }
+
+applicationVariants.all { variant ->
+    variant.outputs.all { output ->
+        outputFileName = "${rootProject.name}-${variant.versionName}.apk"
+    }
+}
+
+tasks.withType(com.android.build.gradle.tasks.PackageApplication).configureEach {
+    workingDir = buildDir
+}
