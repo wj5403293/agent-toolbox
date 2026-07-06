@@ -146,6 +146,7 @@ public class ToolManager {
             rules.put("file_write 的 content 参数会自动剥离行号前缀，可以直接把 file_read 的输出当 content 传入");
             rules.put("Python 工具已内嵌 Python 3.14 环境，直接调用 python 工具即可执行代码，无需通过 shell 检查 Python 是否可用");
             rules.put("执行 Python 代码时直接使用 python 工具，不要用 shell which python 或 shell python3 等方式");
+            rules.put("JSON 字符串值内的双引号必须转义为 \\\"（反斜杠加引号），否则 JSON 解析失败。Python 代码中优先使用单引号避免冲突");
             prompt.put("rules", rules);
 
             // 文件操作最佳实践
