@@ -338,6 +338,24 @@ public class DeepSeekChatBridge {
             "    }\n" +
             "    if (endIdx > 0) jsonStr = jsonStr.substring(0, endIdx + 1);\n" +
             "    try { return JSON.parse(jsonStr); } catch(e) {}\n" +
+            "    // 降级：LLM 可能生成含未转义引号的 JSON，用正则提取关键字段\n" +
+            "    try {\n" +
+            "      var fb = { _rawText: rawText };  // 保留原始文本用于工具调用\n" +
+            "      var mm = jsonStr.match(/\"method\"\\s*:\\s*\"([^\"]*)\"/);\n" +
+            "      if (mm) fb.method = mm[1];\n" +
+            "      var im = jsonStr.match(/\"id\"\\s*:\\s*(\\d+)/);\n" +
+            "      if (im) fb.id = parseInt(im[1]);\n" +
+            "      var tm = jsonStr.match(/\"type\"\\s*:\\s*\"([^\"]*)\"/);\n" +
+            "      var cm = jsonStr.match(/\"content\"\\s*:\\s*\"([^\"]*)\"/);\n" +
+            "      if (tm || cm) {\n" +
+            "        fb.result = {};\n" +
+            "        if (tm) fb.result.type = tm[1];\n" +
+            "        if (cm) fb.result.content = cm[1];\n" +
+            "      }\n" +
+            "      var nm = jsonStr.match(/\"name\"\\s*:\\s*\"([^\"]*)\"/);\n" +
+            "      if (nm) fb.params = { name: nm[1] };\n" +
+            "      return fb;\n" +
+            "    } catch(e2) {}\n" +
             "    return null;\n" +
             "  }\n" +
             "\n" +
@@ -421,28 +439,31 @@ public class DeepSeekChatBridge {
             "      return;\n" +
             "    }\n" +
             "\n" +
+            "    var isFallback = !!parsed._rawText;\n" +
             "    var method = parsed.method || '';\n" +
-            "    Android.log('[JS] JSON 解析成功: method=' + method + ', id=' + (parsed.id || 'none'));\n" +
+            "    Android.log('[JS] JSON 解析' + (isFallback ? '(降级)' : '成功') + ': method=' + method + ', id=' + (parsed.id || 'none'));\n" +
             "\n" +
             "    // 工具调用: {method: 'tools/call', params: {name, arguments}}\n" +
             "    if (method === 'tools/call') {\n" +
-            "      Android.log('[JS] 检测到工具调用: ' + JSON.stringify(parsed));\n" +
-            "      finish(JSON.stringify(parsed));\n" +
+            "      // 降级时用原始文本，确保 arguments 里的 script 等字段完整\n" +
+            "      var payload = isFallback ? parsed._rawText : JSON.stringify(parsed);\n" +
+            "      Android.log('[JS] 检测到工具调用: ' + payload.substring(0, 100));\n" +
+            "      finish(payload);\n" +
             "      return;\n" +
             "    }\n" +
             "\n" +
             "    // 文本回复: {result: {type: 'reply', content: '...'}}\n" +
-            "    if (parsed.jsonrpc && parsed.result) {\n" +
+            "    if (parsed.result) {\n" +
             "      var result = parsed.result;\n" +
             "      var content = result.content || result.text || '';\n" +
             "      Android.log('[JS] 文本回复: type=' + (result.type || 'unknown') + ', content=' + content);\n" +
-            "      finish(content || JSON.stringify(parsed));\n" +
+            "      finish(content || (isFallback ? parsed._rawText : JSON.stringify(parsed)));\n" +
             "      return;\n" +
             "    }\n" +
             "\n" +
             "    // 其他 JSON 格式，原样返回\n" +
-            "    Android.log('[JS] 未知 JSON 格式: ' + JSON.stringify(parsed));\n" +
-            "    finish(JSON.stringify(parsed));\n" +
+            "    Android.log('[JS] 未知 JSON 格式: ' + (isFallback ? parsed._rawText.substring(0, 60) : JSON.stringify(parsed)));\n" +
+            "    finish(isFallback ? parsed._rawText : JSON.stringify(parsed));\n" +
             "  }\n" +
             "\n" +
             "  window[__prefix + 'poll'] = setInterval(pollOnce, 500);\n" +
