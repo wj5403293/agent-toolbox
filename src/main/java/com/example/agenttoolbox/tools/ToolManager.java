@@ -149,6 +149,124 @@ public class ToolManager {
             rules.put("JSON 字符串值内的双引号必须转义为 \\\"（反斜杠加引号），否则 JSON 解析失败。Python 代码中优先使用单引号避免冲突");
             prompt.put("rules", rules);
 
+            // ============================================================
+            // 工作流状态机（FSM）
+            // 服务端内置三套硬编码状态机，自动引导工具调用流程。
+            // 当系统检测到你的任务类型后，会自动切换对应工作流，
+            // 并通过 FSM 校验确保工具调用顺序正确。
+            // ============================================================
+            JSONObject workflows = new JSONObject();
+
+            // 文件读写工作流
+            JSONObject fileWf = new JSONObject();
+            fileWf.put("trigger", "用户要求读取、修改、创建文件时自动激活");
+            JSONArray fileStates = new JSONArray();
+            fileStates.put("IDLE → 空闲");
+            fileStates.put("NEED_READ → 系统自动触发 file_read，读取目标文件");
+            fileStates.put("READ_SUCCESS → 文件内容已缓存，你收到文件内容后分析并决定如何修改");
+            fileStates.put("NEED_EDIT → 你需要输出修改后的新内容（仅输出内容，不要调用 file_write）");
+            fileStates.put("WRITE_READY → 系统自动触发 file_write 写入");
+            fileStates.put("WRITE_DONE → 写入完成，流程结束");
+            fileWf.put("states", fileStates);
+            fileWf.put("note", "READ_SUCCESS 阶段你会收到带行号的文件内容。NEED_EDIT 阶段你只需输出修改后的完整文本，系统会自动写入。路径限白名单：/sdcard/Download/、/sdcard/Documents/ 等");
+            workflows.put("file", fileWf);
+
+            // Python 工作流
+            JSONObject pyWf = new JSONObject();
+            pyWf.put("trigger", "用户要求执行 Python 代码时自动激活");
+            JSONArray pyStates = new JSONArray();
+            pyStates.put("IDLE → 空闲");
+            pyStates.put("NEED_GEN_SCRIPT → 你需要生成 Python 脚本代码");
+            pyStates.put("RUN_SCRIPT → 系统自动执行 python 工具");
+            pyStates.put("EXEC_SUCCESS → 执行成功，收到结果");
+            pyStates.put("EXEC_ERROR → 执行失败，需要修正代码重试");
+            pyWf.put("states", pyStates);
+            pyWf.put("note", "Python 3.14 已内嵌，直接调用 python 工具。禁止使用 os.system/subprocess/import ctypes 等危险调用。超时 60 秒。优先使用单引号避免 JSON 转义冲突");
+            workflows.put("python", pyWf);
+
+            // Shell 工作流
+            JSONObject shWf = new JSONObject();
+            shWf.put("trigger", "用户要求执行 Shell 命令时自动激活");
+            JSONArray shStates = new JSONArray();
+            shStates.put("IDLE → 空闲");
+            shStates.put("NEED_PARSE_CMD → 你需要从用户意图中提取/生成 Shell 命令");
+            shStates.put("RUN_CMD → 系统自动执行 shell 工具");
+            shStates.put("CMD_SUCCESS → 执行成功，收到输出");
+            shStates.put("CMD_ERROR → 执行失败，检查命令修正");
+            shWf.put("states", shStates);
+            shWf.put("note", "禁止高危指令：rm -rf /、su、mount、mkfs、dd if=/dev/zero 等破坏性操作。超时 30 秒");
+            workflows.put("shell", shWf);
+
+            prompt.put("workflows", workflows);
+
+            // ============================================================
+            // 待办计划系统（Todo Planner）
+            // 对于复杂多步骤任务，系统会自动触发计划生成。
+            // 你需要在回复中输出任务计划 JSON，系统会自动解析并逐个执行。
+            // ============================================================
+            JSONObject planSystem = new JSONObject();
+
+            planSystem.put("when", "当用户的任务包含 3 个以上独立步骤，或系统在消息中注入了规划提示词时，你应该在回复中附带计划 JSON");
+
+            // 计划 JSON 格式
+            JSONObject planFormat = new JSONObject();
+            JSONArray planTasksExample = new JSONArray();
+            JSONObject t1 = new JSONObject();
+            t1.put("task_id", "1");
+            t1.put("content", "读取配置文件");
+            t1.put("priority", "high");
+            t1.put("deps", new JSONArray());
+            t1.put("tool_needs", new JSONArray().put("file_read"));
+            planTasksExample.put(t1);
+            JSONObject t2 = new JSONObject();
+            t2.put("task_id", "2");
+            t2.put("content", "修改配置项 timeout=30");
+            t2.put("priority", "high");
+            t2.put("deps", new JSONArray().put("1"));
+            t2.put("tool_needs", new JSONArray().put("file_write"));
+            planTasksExample.put(t2);
+            JSONObject t3 = new JSONObject();
+            t3.put("task_id", "3");
+            t3.put("content", "运行 Python 验证脚本");
+            t3.put("priority", "medium");
+            t3.put("deps", new JSONArray().put("2"));
+            t3.put("tool_needs", new JSONArray().put("python"));
+            planTasksExample.put(t3);
+            planFormat.put("tasks", planTasksExample);
+            planSystem.put("plan_format", planFormat);
+
+            // 任务字段说明
+            JSONObject taskFields = new JSONObject();
+            taskFields.put("task_id", "任务唯一标识（字符串，如 \"1\"、\"2a\"）");
+            taskFields.put("content", "任务简述，一句话描述要做什么");
+            taskFields.put("priority", "优先级：high/medium/low");
+            taskFields.put("deps", "前置依赖任务 ID 列表，必须先完成依赖才能开始本任务");
+            taskFields.put("tool_needs", "预计需要的工具名列表（可选，帮助系统分配工作流）");
+            taskFields.put("checkpoint", "验收标准（可选），描述怎样算完成");
+            taskFields.put("desc", "详细描述（可选），补充说明");
+            planSystem.put("task_fields", taskFields);
+
+            // 任务状态
+            JSONObject taskStatuses = new JSONObject();
+            taskStatuses.put("pending", "待处理，等待前置依赖完成");
+            taskStatuses.put("in_progress", "正在执行中（同时只有一个）");
+            taskStatuses.put("completed", "已完成");
+            taskStatuses.put("failed", "失败（最多重试 3 次）");
+            taskStatuses.put("paused", "暂停，等待手动恢复");
+            planSystem.put("task_statuses", taskStatuses);
+
+            // 使用方式
+            JSONArray planUsage = new JSONArray();
+            planUsage.put("在文本回复中嵌入计划 JSON，格式：你的回复文字... 然后 {\"tasks\":[...]}");
+            planUsage.put("系统会自动检测并解析计划 JSON，推送到前端待办面板");
+            planUsage.put("系统按依赖+优先级自动选取下一个任务，注入到你的下一轮消息中");
+            planUsage.put("每个任务完成后系统自动推进到下一个，全程无需手动管理");
+            planUsage.put("如果任务失败，系统会通知你并附上失败原因，你可以修正计划");
+            planUsage.put("不要在一次回复中同时输出计划 JSON 和工具调用，计划放在文本回复中即可");
+            planSystem.put("usage", planUsage);
+
+            prompt.put("plan_system", planSystem);
+
             // 文件操作最佳实践
             JSONArray fileOps = new JSONArray();
             fileOps.put(new JSONObject().put("scenario", "读取文件").put("call",
