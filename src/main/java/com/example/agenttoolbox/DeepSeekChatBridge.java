@@ -260,14 +260,20 @@ public class DeepSeekChatBridge {
             "\n" +
             "  // ===== Helper Functions =====\n" +
             "  function getAssistantMessages() {\n" +
-            "    var list = document.querySelectorAll('.ds-markdown.ds-assistant-message-main-content');\n" +
-            "    if (list && list.length > 0) return list;\n" +
-            "    list = document.querySelectorAll('[class*=\"ds-assistant-message-main-content\"]');\n" +
-            "    if (list && list.length > 0) return list;\n" +
-            "    list = document.querySelectorAll('.ds-markdown--block');\n" +
-            "    if (list && list.length > 0) return list;\n" +
-            "    list = document.querySelectorAll('[class*=\"ds-markdown\"]');\n" +
-            "    return list || [];\n" +
+            "    var selectors = [\n" +
+            "      '.ds-markdown.ds-assistant-message-main-content',\n" +
+            "      '[class*=\"ds-assistant-message-main-content\"]',\n" +
+            "      '[class*=\"assistant-message-main\"]',\n" +
+            "      '.ds-markdown--block',\n" +
+            "      '[class*=\"ds-markdown\"]',\n" +
+            "      '[class*=\"assistant-message\"]',\n" +
+            "      '[class*=\"markdown\"]'\n" +
+            "    ];\n" +
+            "    for (var i = 0; i < selectors.length; i++) {\n" +
+            "      var list = document.querySelectorAll(selectors[i]);\n" +
+            "      if (list && list.length > 0) return list;\n" +
+            "    }\n" +
+            "    return [];\n" +
             "  }\n" +
             "\n" +
             "  function isSendButtonReady() {\n" +
@@ -323,23 +329,41 @@ public class DeepSeekChatBridge {
             "    }\n" +
             "    if (stableCount < 3) return;\n" +
             "\n" +
-            "    // Step 5: Extract JSON from first {\n" +
-            "    var firstBrace = rawText.indexOf('{');\n" +
-            "    if (firstBrace === -1) {\n" +
-            "      finish(rawText);\n" +
-            "      return;\n" +
-            "    }\n" +
-            "    var jsonStr = rawText.substring(firstBrace);\n" +
-            "\n" +
-            "    // Step 6: JSON.parse\n" +
+            "    // Step 5: Extract JSON - 尝试多种方式\n" +
+            "    var jsonStr = '';\n" +
             "    var parsed = null;\n" +
-            "    try { parsed = JSON.parse(jsonStr); } catch(e) {}\n" +
+            "\n" +
+            "    // 方式1: 从 rawText 提取第一个完整 JSON 对象\n" +
+            "    var firstBrace = rawText.indexOf('{');\n" +
+            "    if (firstBrace !== -1) {\n" +
+            "      jsonStr = rawText.substring(firstBrace);\n" +
+            "      // 尝试找到匹配的闭合大括号\n" +
+            "      var depth = 0; var endIdx = -1;\n" +
+            "      for (var ci = 0; ci < jsonStr.length; ci++) {\n" +
+            "        if (jsonStr[ci] === '{') depth++;\n" +
+            "        else if (jsonStr[ci] === '}') { depth--; if (depth === 0) { endIdx = ci; break; } }\n" +
+            "      }\n" +
+            "      if (endIdx > 0) jsonStr = jsonStr.substring(0, endIdx + 1);\n" +
+            "      try { parsed = JSON.parse(jsonStr); } catch(e) {}\n" +
+            "    }\n" +
+            "\n" +
+            "    // 方式2: 如果失败，尝试用正则提取 jsonrpc 格式\n" +
             "    if (!parsed) {\n" +
-            "      // Fix common escape issues\n" +
+            "      var match = rawText.match(/\{[\s]*\"jsonrpc\"[^]*?\}/);\n" +
+            "      if (match) {\n" +
+            "        jsonStr = match[0];\n" +
+            "        try { parsed = JSON.parse(jsonStr); } catch(e) {}\n" +
+            "      }\n" +
+            "    }\n" +
+            "\n" +
+            "    // 方式3: 修复常见转义问题\n" +
+            "    if (!parsed && jsonStr) {\n" +
             "      var fixed = jsonStr.replace(/\\\\'/g, \"'\");\n" +
             "      try { parsed = JSON.parse(fixed); } catch(e) {}\n" +
             "    }\n" +
+            "\n" +
             "    if (!parsed) {\n" +
+            "      Android.log('[JS] JSON 解析失败, rawText长度=' + rawText.length + ' 前100字=' + rawText.substring(0, 100));\n" +
             "      finish(rawText);\n" +
             "      return;\n" +
             "    }\n" +
