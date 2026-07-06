@@ -962,7 +962,14 @@ public class McpServer {
                                                                 String extractedContent = resultJson.getString("content");
                                                                 if (extractedContent != null && !extractedContent.isEmpty()) {
                                                                     log("[LLM] result.content: " + extractedContent.length());
-                                                                    finalReply = extractedContent;
+                                                                    // 如果 content 是待办计划 JSON，保留外层 JSON-RPC 包装，
+                                                                    // 让主循环的 hasResult 分支正确检测 plan
+                                                                    if (extractedContent.trim().startsWith("{\"tasks\"")) {
+                                                                        log("[LLM] result.content 是计划 JSON，保留外层包装");
+                                                                        // finalReply 不变，保持完整的 JSON-RPC 消息
+                                                                    } else {
+                                                                        finalReply = extractedContent;
+                                                                    }
                                                                 }
                                                             }
                                                         } else if (resultObj instanceof String) {
