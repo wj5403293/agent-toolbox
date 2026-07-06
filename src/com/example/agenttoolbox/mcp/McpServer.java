@@ -297,14 +297,11 @@ public class McpServer {
         }
 
         /**
-         * 截断日志以防止过长日志
+         * 截断日志以防止过长日志（当前不截断，记录完整内容）
          */
         private String truncateForLogging(String text, int maxLen) {
-            if (text == null) return "";
-            if (text.length() > maxLen) {
-                return text.substring(0, maxLen) + "... (共 " + text.length() + " 字符)";
-            }
-            return text;
+            if (text == null) return "(null)";
+            return text;  // 不截断，记录完整内容
         }
 
         /**
@@ -850,8 +847,7 @@ public class McpServer {
                                             log("    ├─ 回复长度: " + (reply == null ? 0 : reply.length()) + " 字符");
                                             log("    ├─ 回复是否为空: " + (reply == null || reply.isEmpty() ? "是" : "否"));
                                             if (reply != null && reply.length() > 0) {
-                                                log("    ├─ 回复前150字符: " + (reply.length() > 150 ? reply.substring(0, 150) + "..." : reply));
-                                                log("    └─ 回复后100字符: " + (reply.length() > 100 ? "..." + reply.substring(reply.length() - 100) : reply));
+                                                log("    └─ 回复内容: " + reply);
                                             }
                                             // 工具调用 JSON 流结束，恢复心跳
                                             if (inToolCallStream.getAndSet(false)) {
