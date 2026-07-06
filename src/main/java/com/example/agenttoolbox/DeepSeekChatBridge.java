@@ -338,23 +338,33 @@ public class DeepSeekChatBridge {
             "    }\n" +
             "    if (endIdx > 0) jsonStr = jsonStr.substring(0, endIdx + 1);\n" +
             "    try { return JSON.parse(jsonStr); } catch(e) {}\n" +
-            "    // 降级：LLM 可能生成含未转义引号的 JSON，用正则提取关键字段\n" +
+            "    // 修复 JSON：content 字段值中可能有未转义双引号（如中文引号\"xxx\"）\n" +
+            "    // 找到 content 值，将其中的 \" 转义为 \\\" 后重新解析\n" +
             "    try {\n" +
-            "      var fb = { _rawText: rawText };  // 保留原始文本用于工具调用\n" +
-            "      var mm = jsonStr.match(/\"method\"\\s*:\\s*\"([^\"]*)\"/);\n" +
-            "      if (mm) fb.method = mm[1];\n" +
-            "      var im = jsonStr.match(/\"id\"\\s*:\\s*(\\d+)/);\n" +
-            "      if (im) fb.id = parseInt(im[1]);\n" +
-            "      var tm = jsonStr.match(/\"type\"\\s*:\\s*\"([^\"]*)\"/);\n" +
-            "      var cm = jsonStr.match(/\"content\"\\s*:\\s*\"([^\"]*)\"/);\n" +
-            "      if (tm || cm) {\n" +
-            "        fb.result = {};\n" +
-            "        if (tm) fb.result.type = tm[1];\n" +
-            "        if (cm) fb.result.content = cm[1];\n" +
+            "      var ctIdx = jsonStr.indexOf('\"content\"');\n" +
+            "      if (ctIdx !== -1) {\n" +
+            "        var colonIdx = jsonStr.indexOf(':', ctIdx);\n" +
+            "        var valStart = jsonStr.indexOf('\"', colonIdx + 1);\n" +
+            "        if (valStart > 0) {\n" +
+            "          // 从末尾往前找最后一个 \" 后跟 , 或 }\n" +
+            "          var valEnd = -1;\n" +
+            "          for (var i = jsonStr.length - 1; i > valStart; i--) {\n" +
+            "            if (jsonStr[i] === '\"') {\n" +
+            "              var rest = jsonStr.substring(i + 1).replace(/\\s/g, '');\n" +
+            "              if (rest[0] === '}' || rest[0] === ']' || rest[0] === ',') {\n" +
+            "                valEnd = i;\n" +
+            "                break;\n" +
+            "              }\n" +
+            "            }\n" +
+            "          }\n" +
+            "          if (valEnd > valStart) {\n" +
+            "            var content = jsonStr.substring(valStart + 1, valEnd);\n" +
+            "            var escaped = content.replace(/\"/g, '\\\\\"');\n" +
+            "            var fixed = jsonStr.substring(0, valStart + 1) + escaped + jsonStr.substring(valEnd);\n" +
+            "            return JSON.parse(fixed);\n" +
+            "          }\n" +
+            "        }\n" +
             "      }\n" +
-            "      var nm = jsonStr.match(/\"name\"\\s*:\\s*\"([^\"]*)\"/);\n" +
-            "      if (nm) fb.params = { name: nm[1] };\n" +
-            "      return fb;\n" +
             "    } catch(e2) {}\n" +
             "    return null;\n" +
             "  }\n" +
@@ -411,15 +421,12 @@ public class DeepSeekChatBridge {
             "    // 取最新的 AI 回复元素\n" +
             "    var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
             "\n" +
-            "    // 提取文本（优先从 span）\n" +
+            "    // 提取文本：优先用元素完整文本，span 可能只包含部分内容\n" +
+            "    var fullText = (lastAi.innerText || lastAi.textContent || '').trim();\n" +
             "    var span = lastAi.querySelector('span');\n" +
-            "    var rawText = '';\n" +
-            "    if (span) {\n" +
-            "      rawText = (span.innerText || span.textContent || '').trim();\n" +
-            "    }\n" +
-            "    if (!rawText) {\n" +
-            "      rawText = (lastAi.innerText || lastAi.textContent || '').trim();\n" +
-            "    }\n" +
+            "    var spanText = span ? (span.innerText || span.textContent || '').trim() : '';\n" +
+            "    // 取两者中更长的（span 可能截断，元素可能包含多余内容）\n" +
+            "    var rawText = spanText.length > fullText.length ? spanText : fullText;\n" +
             "    if (!rawText || rawText.length < 2) return;\n" +
             "\n" +
             "    // 稳定性检查：文本停止变化 3 次（1.5 秒）\n" +
@@ -439,14 +446,12 @@ public class DeepSeekChatBridge {
             "      return;\n" +
             "    }\n" +
             "\n" +
-            "    var isFallback = !!parsed._rawText;\n" +
             "    var method = parsed.method || '';\n" +
-            "    Android.log('[JS] JSON 解析' + (isFallback ? '(降级)' : '成功') + ': method=' + method + ', id=' + (parsed.id || 'none'));\n" +
+            "    Android.log('[JS] JSON 解析成功: method=' + method + ', id=' + (parsed.id || 'none'));\n" +
             "\n" +
             "    // 工具调用: {method: 'tools/call', params: {name, arguments}}\n" +
             "    if (method === 'tools/call') {\n" +
-            "      // 降级时用原始文本，确保 arguments 里的 script 等字段完整\n" +
-            "      var payload = isFallback ? parsed._rawText : JSON.stringify(parsed);\n" +
+            "      var payload = JSON.stringify(parsed);\n" +
             "      Android.log('[JS] 检测到工具调用: ' + payload.substring(0, 100));\n" +
             "      finish(payload);\n" +
             "      return;\n" +
@@ -457,13 +462,13 @@ public class DeepSeekChatBridge {
             "      var result = parsed.result;\n" +
             "      var content = result.content || result.text || '';\n" +
             "      Android.log('[JS] 文本回复: type=' + (result.type || 'unknown') + ', content=' + content);\n" +
-            "      finish(content || (isFallback ? parsed._rawText : JSON.stringify(parsed)));\n" +
+            "      finish(content || JSON.stringify(parsed));\n" +
             "      return;\n" +
             "    }\n" +
             "\n" +
             "    // 其他 JSON 格式，原样返回\n" +
-            "    Android.log('[JS] 未知 JSON 格式: ' + (isFallback ? parsed._rawText.substring(0, 60) : JSON.stringify(parsed)));\n" +
-            "    finish(isFallback ? parsed._rawText : JSON.stringify(parsed));\n" +
+            "    Android.log('[JS] 未知 JSON 格式: ' + JSON.stringify(parsed).substring(0, 60));\n" +
+            "    finish(JSON.stringify(parsed));\n" +
             "  }\n" +
             "\n" +
             "  window[__prefix + 'poll'] = setInterval(pollOnce, 500);\n" +

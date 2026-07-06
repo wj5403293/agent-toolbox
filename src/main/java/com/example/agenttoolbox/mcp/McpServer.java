@@ -18,6 +18,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.NetworkInterface;
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -685,7 +687,29 @@ public class McpServer {
                         log("[MCP] 消息长度: " + message.length() + " 字符");
                         log("[MCP] 用户消息 (" + message.length() + " 字符): " + message);
                         log("[INIT] 桥接: " + (bridge.isRegistered() ? "已注册" : "未注册"));
-                        log("[MCP] 请求ID: stream-" + System.currentTimeMillis());
+
+                        // 会话缓存：支持客户端传入 conversationId 复用已有会话
+                        final long conversationId;
+                        SessionCache.SessionData cachedSession = null;
+                        boolean isNewSession = false;
+                        if (body.has("conversationId")) {
+                            long reqId = body.optLong("conversationId", 0);
+                            if (reqId > 0 && SessionCache.getInstance().hasSession(reqId)) {
+                                conversationId = reqId;
+                                cachedSession = SessionCache.getInstance().get(conversationId);
+                                log("[SESSION] 复用会话缓存: id=" + conversationId
+                                    + " systemPrompt=" + cachedSession.systemPrompt.length() + "字符"
+                                    + " isFirstMessage=" + cachedSession.isFirstMessage);
+                            } else {
+                                log("[SESSION] conversationId=" + reqId + " 缓存不存在，创建新会话");
+                                conversationId = conversationIdSeq.incrementAndGet();
+                                isNewSession = true;
+                            }
+                        } else {
+                            conversationId = conversationIdSeq.incrementAndGet();
+                            isNewSession = true;
+                        }
+                        log("[INIT] 会话ID: " + conversationId);
 
                         // SSE 头部
                         String header = "HTTP/1.1 200 OK\r\n" +
@@ -753,34 +777,65 @@ public class McpServer {
                         int round = 0;
                         boolean finalDone = false;
                         int toolCallCount = 0; // 防止工具调用循环
-                        // 本次对话的唯一会话 ID，贯穿整条链路（initialize / tools/call / 工具结果 / 最终回复）
-                        final long conversationId = conversationIdSeq.incrementAndGet();
-                        log("[INIT] 会话ID: " + conversationId);
+
+                        // 新会话：创建缓存
+                        if (isNewSession) {
+                            String systemPrompt = ToolManager.getInstance().getSystemPrompt();
+                            JSONArray toolsList = ToolManager.getInstance().getToolsList();
+                            JSONObject systemObj = new JSONObject(systemPrompt);
+                            cachedSession = new SessionCache.SessionData(systemPrompt, toolsList, systemObj);
+                            cachedSession.isFirstMessage = true;
+                            SessionCache.getInstance().put(conversationId, cachedSession);
+                            log("[SESSION] 新会话缓存已创建: id=" + conversationId
+                                + " systemPrompt=" + systemPrompt.length() + "字符");
+                        }
+
+                        // 检测任务类型并切换 FSM
+                        if (cachedSession != null) {
+                            SessionCache.TaskType detectedType = detectTaskType(message);
+                            SessionCache.getInstance().switchTaskType(conversationId, detectedType);
+                            log("[FSM] 任务类型: " + detectedType);
+                        }
 
                         while (round < maxRounds && !finalDone) {
                             round++;
                             final int currentRound = round;
                             
                             String messageToSend = currentMessage;
-                            if (round == 1) {
-                                // JSON-RPC 2.0：单条消息封装 system + user
-                                // system 提示词已自带 enforce 字段，不再额外拼接 instruction
+                            if (round == 1 && cachedSession != null && cachedSession.isFirstMessage) {
+                                // 首次消息：发送完整 system + tools + user
+                                try {
+                                    JSONObject rpc = new JSONObject();
+                                    rpc.put("jsonrpc", "2.0");
+                                    rpc.put("method", "initialize");
+                                    JSONObject params = new JSONObject();
+                                    params.put("system", cachedSession.systemObj);
+                                    params.put("user", currentMessage);
+                                    rpc.put("params", params);
+                                    rpc.put("id", conversationId);
+                                    messageToSend = rpc.toString();
+                                    // 标记已发送过 system+tools，后续消息不再携带
+                                    cachedSession.isFirstMessage = false;
+                                    log("[SESSION] 首次消息: 发送完整 system+tools (" + messageToSend.length() + "字符)");
+                                } catch (JSONException e) {
+                                    messageToSend = cachedSession.systemPrompt;
+                                }
+                                log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
+                            } else if (round == 1) {
+                                // 兜底：无缓存时生成 system prompt
                                 String systemPrompt = ToolManager.getInstance().getSystemPrompt();
                                 try {
                                     JSONObject rpc = new JSONObject();
                                     rpc.put("jsonrpc", "2.0");
                                     rpc.put("method", "initialize");
                                     JSONObject params = new JSONObject();
-                                    // system 字段直接放提示词 JSON 对象（解析后嵌入，而非字符串拼接）
                                     JSONObject sysObj = new JSONObject(systemPrompt);
                                     params.put("system", sysObj);
                                     params.put("user", currentMessage);
                                     rpc.put("params", params);
-                                    // 用本次对话的唯一会话 ID，贯穿整条链路
                                     rpc.put("id", conversationId);
                                     messageToSend = rpc.toString();
                                 } catch (JSONException e) {
-                                    // 兜底：极少触发
                                     messageToSend = systemPrompt;
                                 }
                                 log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
@@ -1051,6 +1106,20 @@ public class McpServer {
                             log("[TOOL] 调用请求:\n" + replyJson.toString(2));
 
                             toolCallCount++;
+                            // FSM 校验：检查工具调用是否合固定在定流转
+                            String fsmBlockReason = validateFsmToolCall(cachedSession, toolNameForLog, replyJson);
+                            if (fsmBlockReason != null) {
+                                log("[FSM] 工具调用被拦截: " + fsmBlockReason);
+                                // 发送错误消息给 LLM，让它重试
+                                JSONObject errorReply = new JSONObject();
+                                errorReply.put("jsonrpc", "2.0");
+                                errorReply.put("result", new JSONObject()
+                                    .put("type", "error")
+                                    .put("content", "工具调用被拦截: " + fsmBlockReason));
+                                errorReply.put("id", conversationId);
+                                currentMessage = errorReply.toString();
+                                continue;
+                            }
 
                             // 硬限制：超过 3 次工具调用，强制文本回复
                             if (toolCallCount > 3) {
@@ -1068,6 +1137,28 @@ public class McpServer {
                                 toolResult = "工具执行返回空结果";
                             }
                             boolean toolIsError = toolResult.startsWith("错误") || toolResult.startsWith("工具执行失败");
+
+                            // 更新会话中间状态
+                            if (cachedSession != null && !toolIsError) {
+                                updateSessionState(cachedSession, toolNameForLog, replyJson.optJSONObject("params"), toolResult);
+                            }
+
+                            // FSM 状态更新
+                            if (cachedSession != null && !toolIsError) {
+                                updateFsmState(cachedSession, toolNameForLog, toolResult);
+                            }
+
+                            // FSM 自动下一步：文件读写流程中，读完后自动触发写操作
+                            JSONObject autoNextStep = getFsmAutoNextStep(cachedSession, conversationId, toolNameForLog);
+                            if (autoNextStep != null) {
+                                log("[FSM] 自动触发下一步: " + autoNextStep.optJSONObject("params").optString("name"));
+                                toolResult = executeToolCall(autoNextStep);
+                                log("[FSM] 自动步骤执行完成: " + (toolResult != null ? toolResult.length() : 0) + "字符");
+                                if (cachedSession != null) {
+                                    updateFsmState(cachedSession, 
+                                        autoNextStep.optJSONObject("params").optString("name"), toolResult);
+                                }
+                            }
 
                             // 构造 JSON-RPC 2.0 工具结果响应，发送给 LLM 继续对话
                             JSONObject toolResultMsg = new JSONObject();
@@ -1385,13 +1476,263 @@ public class McpServer {
             return JsonRpcResponse.success(request.getId(), result).toString();
         }
 
+        /**
+         * 检测用户消息中的任务类型
+         */
+        private SessionCache.TaskType detectTaskType(String message) {
+            if (message == null) return SessionCache.TaskType.NONE;
+            String msg = message.toLowerCase();
+            // 文件操作关键词
+            if (msg.contains("文件") || msg.contains("读取") || msg.contains("写入") 
+                || msg.contains("修改") || msg.contains("编辑") || msg.contains("查看")
+                || msg.contains("读写") || msg.contains("file") || msg.contains("作文")
+                || msg.contains("内容") || msg.contains("文本") || msg.contains("保存")) {
+                // 明确是文件操作
+                if (msg.contains("/sdcard") || msg.contains("/storage") || msg.contains("路径")
+                    || msg.contains("目录") || msg.contains("下载") || msg.contains("Download")) {
+                    return SessionCache.TaskType.FILE;
+                }
+                // 有修改/编辑意图 → 文件操作
+                if (msg.contains("修改") || msg.contains("编辑") || msg.contains("改成")
+                    || msg.contains("替换") || msg.contains("追加") || msg.contains("写入")) {
+                    return SessionCache.TaskType.FILE;
+                }
+            }
+            // Python 关键词
+            if (msg.contains("python") || msg.contains("运行代码") || msg.contains("执行脚本")
+                || msg.contains("计算") || msg.contains("编程") || msg.contains("代码")
+                || msg.contains("print") || msg.contains("import") || msg.contains("def ")
+                || msg.contains("py脚本") || msg.contains("运行py")) {
+                return SessionCache.TaskType.PYTHON;
+            }
+            // Shell 关键词
+            if (msg.contains("shell") || msg.contains("命令") || msg.contains("终端")
+                || msg.contains("执行") || msg.contains("运行") || msg.contains("ls ")
+                || msg.contains("cat ") || msg.contains("ps ") || msg.contains("grep ")
+                || msg.contains("df ") || msg.contains("free ") || msg.contains("top ")
+                || msg.contains("pm ") || msg.contains("dumpsys") || msg.contains("logcat")) {
+                return SessionCache.TaskType.SHELL;
+            }
+            return SessionCache.TaskType.NONE;
+        }
+
+        /**
+         * FSM 校验：检查工具调用是否合固定在定流转
+         */
+        private String validateFsmToolCall(SessionCache.SessionData session, String toolName, JSONObject replyJson) {
+            if (session == null || toolName == null) return null;
+            
+            switch (session.currentTaskType) {
+                case FILE:
+                    return validateFileFsm(session, toolName, replyJson);
+                case PYTHON:
+                    return validatePythonFsm(session, toolName);
+                case SHELL:
+                    return validateShellFsm(session, toolName);
+                default:
+                    return null; // GM 或 NONE 不校验
+            }
+        }
+
+        private String validateFileFsm(SessionCache.SessionData session, String toolName, JSONObject replyJson) {
+            FileWorkflow.FileState state = session.fileWorkflow.getState();
+            
+            if ("file_write".equals(toolName)) {
+                // file_write 必须经过 file_read
+                if (state != FileWorkflow.FileState.WRITE_READY && state != FileWorkflow.FileState.READ_SUCCESS) {
+                    return "file_write 必须先在 file_read 读取文件，当前状态: " + state;
+                }
+                // 校验路径一致
+                JSONObject params = replyJson.optJSONObject("params");
+                if (params != null) {
+                    JSONObject args = params.optJSONObject("arguments");
+                    if (args != null) {
+                        String writePath = args.optString("path", "");
+                        String readPath = session.fileWorkflow.getTargetPath();
+                        if (readPath != null && !readPath.equals(writePath)) {
+                            return "file_write 路径与 file_read 不一致: " + writePath + " vs " + readPath;
+                        }
+                    }
+                }
+            }
+            if ("file_read".equals(toolName)) {
+                // file_read 可以随时调用（重置流程）
+                JSONObject params = replyJson.optJSONObject("params");
+                if (params != null) {
+                    JSONObject args = params.optJSONObject("arguments");
+                    if (args != null) {
+                        String path = args.optString("path", "");
+                        // 路径白名单校验
+                        if (!path.startsWith("/sdcard/") && !path.startsWith("/storage/") 
+                            && !path.startsWith("/data/local/tmp/")) {
+                            return "file_read 路径不在白名单: " + path;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private String validatePythonFsm(SessionCache.SessionData session, String toolName) {
+            PythonWorkflow.PyState state = session.pythonWorkflow.getState();
+            if ("python".equals(toolName)) {
+                if (state != PythonWorkflow.PyState.RUN_SCRIPT && state != PythonWorkflow.PyState.IDLE) {
+                    return "python 调用未在正确状态: " + state;
+                }
+            }
+            return null;
+        }
+
+        private String validateShellFsm(SessionCache.SessionData session, String toolName) {
+            ShellWorkflow.ShellState state = session.shellWorkflow.getState();
+            if ("shell".equals(toolName)) {
+                if (state != ShellWorkflow.ShellState.RUN_CMD && state != ShellWorkflow.ShellState.IDLE) {
+                    return "shell 调用未在正确状态: " + state;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * FSM 状态更新（工具执行后）
+         */
+        private void updateFsmState(SessionCache.SessionData session, String toolName, String result) {
+            if (session == null || toolName == null) return;
+            
+            switch (session.currentTaskType) {
+                case FILE:
+                    switch (toolName) {
+                        case "file_read":
+                            session.fileWorkflow.onReadResult(result);
+                            // 如果 result 中包含编辑意图 → 进入 NEED_EDIT
+                            if (result != null && (result.contains("修改") || result.contains("编辑"))) {
+                                session.fileWorkflow.requestEdit();
+                            }
+                            log("[FSM] FileState: " + session.fileWorkflow.getState());
+                            break;
+                        case "file_write":
+                            session.fileWorkflow.onWriteDone();
+                            log("[FSM] FileState: " + session.fileWorkflow.getState());
+                            break;
+                    }
+                    break;
+                case PYTHON:
+                    if ("python".equals(toolName)) {
+                        session.pythonWorkflow.onExecResult(result);
+                        log("[FSM] PyState: " + session.pythonWorkflow.getState());
+                    }
+                    break;
+                case SHELL:
+                    if ("shell".equals(toolName)) {
+                        session.shellWorkflow.onExecResult(result);
+                        log("[FSM] ShellState: " + session.shellWorkflow.getState());
+                    }
+                    break;
+            }
+        }
+
+        /**
+         * FSM 自动下一步：流水线自动推进
+         * 例如文件操作中 file_read 完成后，自动构建 file_write 调用
+         */
+        private JSONObject getFsmAutoNextStep(SessionCache.SessionData session, long conversationId, String toolName) {
+            if (session == null) return null;
+            
+            switch (session.currentTaskType) {
+                case FILE:
+                    if ("file_read".equals(toolName)) {
+                        FileWorkflow fw = session.fileWorkflow;
+                        if (fw.getState() == FileWorkflow.FileState.READ_SUCCESS && fw.getNewContent() != null) {
+                            // 有修改内容 → 自动触发 write
+                            return fw.buildWriteCall(1, "replace");
+                        }
+                    }
+                    break;
+                case PYTHON:
+                    if (session.pythonWorkflow.getState() == PythonWorkflow.PyState.RUN_SCRIPT) {
+                        return session.pythonWorkflow.buildRunCall(conversationId);
+                    }
+                    break;
+                case SHELL:
+                    if (session.shellWorkflow.getState() == ShellWorkflow.ShellState.RUN_CMD) {
+                        return session.shellWorkflow.buildRunCall(conversationId);
+                    }
+                    break;
+            }
+            return null;
+        }
+
+        /**
+         * 更新会话中间状态（GM 工具执行后）
+         */
+        private void updateSessionState(SessionCache.SessionData session, String toolName, JSONObject params, String result) {
+            try {
+                switch (toolName) {
+                    case "gm_root_status":
+                        session.intermediateState.put("hasRoot", result.contains("已获取") || result.contains("root"));
+                        log("[STATE] hasRoot=" + session.intermediateState.get("hasRoot"));
+                        break;
+                    case "gm_process_list":
+                        session.intermediateState.put("hasProcessList", true);
+                        session.intermediateState.put("processListResult", result);
+                        log("[STATE] hasProcessList=true");
+                        break;
+                    case "gm_attach_process":
+                        if (params != null && params.has("arguments")) {
+                            JSONObject args = params.optJSONObject("arguments");
+                            if (args != null && args.has("pid")) {
+                                session.intermediateState.put("attachedPid", args.opt("pid"));
+                                log("[STATE] attachedPid=" + args.opt("pid"));
+                            }
+                        }
+                        break;
+                    case "gm_memory_search":
+                        session.intermediateState.put("lastSearchResult", result);
+                        log("[STATE] 内存搜索已缓存");
+                        break;
+                    case "file_read":
+                        if (params != null && params.has("arguments")) {
+                            JSONObject args = params.optJSONObject("arguments");
+                            if (args != null && args.has("path")) {
+                                @SuppressWarnings("unchecked")
+                                Map<String, String> fileCache = (Map<String, String>) session.intermediateState.get("fileCache");
+                                if (fileCache == null) {
+                                    fileCache = new HashMap<>();
+                                    session.intermediateState.put("fileCache", fileCache);
+                                }
+                                fileCache.put(args.optString("path"), result);
+                                log("[STATE] fileCache: " + args.optString("path"));
+                            }
+                        }
+                        break;
+                }
+            } catch (Exception e) {
+                log("[STATE] 状态更新异常: " + e.getMessage());
+            }
+        }
+
         private String handleInitialize(JsonRpcRequest request) throws JSONException {
+            long conversationId = request.getId();
+            
+            // 生成系统提示词和工具列表，存入会话缓存
+            String systemPrompt = ToolManager.getInstance().getSystemPrompt();
+            JSONArray toolsList = ToolManager.getInstance().getToolsList();
+            JSONObject systemObj = new JSONObject(systemPrompt);
+            
+            SessionCache.SessionData session = new SessionCache.SessionData(systemPrompt, toolsList, systemObj);
+            session.isFirstMessage = true;
+            SessionCache.getInstance().put(conversationId, session);
+            log("[SESSION] initialize 会话缓存已创建: id=" + conversationId
+                + " systemPrompt=" + systemPrompt.length() + "字符"
+                + " tools=" + toolsList.length() + "个");
+
             JSONObject result = new JSONObject();
             JSONObject serverInfo = new JSONObject();
             serverInfo.put("name", "AgentToolbox MCP Server");
             serverInfo.put("version", "1.0.0");
             result.put("serverInfo", serverInfo);
             result.put("protocolVersion", "2024-11-05");
+            result.put("conversationId", conversationId);
 
             JSONObject capabilities = new JSONObject();
             JSONObject tools = new JSONObject();
