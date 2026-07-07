@@ -353,11 +353,20 @@ public class DeepSeekChatBridge {
             "    var firstBrace = rawText.indexOf('{');\n" +
             "    if (firstBrace === -1) return null;\n" +
             "    var jsonStr = rawText.substring(firstBrace);\n" +
-            "    // 匹配完整 JSON 对象\n" +
+            "    // 匹配完整 JSON 对象（支持字符串内的 {}）\n" +
             "    var depth = 0; var endIdx = -1;\n" +
+            "    var inStr = false; var esc = false;\n" +
             "    for (var ci = 0; ci < jsonStr.length; ci++) {\n" +
-            "      if (jsonStr[ci] === '{') depth++;\n" +
-            "      else if (jsonStr[ci] === '}') { depth--; if (depth === 0) { endIdx = ci; break; } }\n" +
+            "      var ch = jsonStr[ci];\n" +
+            "      if (esc) { esc = false; continue; }\n" +
+            "      if (inStr) {\n" +
+            "        if (ch === '\\\\') { esc = true; }\n" +
+            "        else if (ch === '\"') { inStr = false; }\n" +
+            "      } else {\n" +
+            "        if (ch === '\"') { inStr = true; }\n" +
+            "        else if (ch === '{') { depth++; }\n" +
+            "        else if (ch === '}') { depth--; if (depth === 0) { endIdx = ci; break; } }\n" +
+            "      }\n" +
             "    }\n" +
             "    if (endIdx > 0) jsonStr = jsonStr.substring(0, endIdx + 1);\n" +
             "    try { return JSON.parse(jsonStr); } catch(e) {}\n" +

@@ -504,60 +504,52 @@ public class McpServer {
          * DeepSeek 网页渲染时可能把 JSON 字符串值中的 \" 显示为未转义的 "，
          * 导致 JSONObject 解析失败。
          *
-         * 算法：在字符串值内部遇到 " 时，检查后面（跳过空白）是否是 JSON 结构字符
-         * (, } ] :)。如果不是，认为这是字符串内部的未转义双引号，插入 \ 转义。
+         * 算法：找到 content 字段的值边界，将其内部所有的 " 转义为 \"，
+         * 然后重新组装 JSON 字符串。这种方法正确处理嵌套 JSON 作为字符串值的情况。
          */
         private String fixUnescapedQuotes(String jsonStr) {
-            StringBuilder sb = new StringBuilder(jsonStr.length() + 32);
-            boolean inString = false;
-            char quoteChar = '"';
-            boolean escape = false;
-
-            for (int i = 0; i < jsonStr.length(); i++) {
-                char c = jsonStr.charAt(i);
-
-                if (inString) {
-                    if (escape) {
-                        escape = false;
-                        sb.append(c);
-                        continue;
-                    }
-                    if (c == '\\') {
-                        escape = true;
-                        sb.append(c);
-                        continue;
-                    }
-                    if (c == quoteChar) {
-                        // 检查后面（跳过空白）是否是 JSON 结构字符
-                        int j = i + 1;
-                        while (j < jsonStr.length() && Character.isWhitespace(jsonStr.charAt(j))) {
-                            j++;
-                        }
-                        if (j < jsonStr.length()) {
-                            char next = jsonStr.charAt(j);
-                            if (next == ',' || next == '}' || next == ']' || next == ':') {
-                                // 字符串正常结束
-                                inString = false;
-                                sb.append(c);
-                                continue;
-                            }
-                        }
-                        // 字符串内部的未转义双引号，转义它
-                        sb.append('\\').append(c);
-                        continue;
-                    }
-                    sb.append(c);
-                    continue;
-                }
-
-                if (c == '"' || c == '\'') {
-                    inString = true;
-                    quoteChar = c;
-                }
-                sb.append(c);
+            if (jsonStr == null || jsonStr.isEmpty()) return jsonStr;
+            
+            // 找 "content" 字段的值边界
+            int ctIdx = jsonStr.indexOf("\"content\"");
+            if (ctIdx < 0) ctIdx = jsonStr.indexOf("\"text\"");
+            if (ctIdx < 0) return jsonStr;  // 没有需要修复的字段
+            
+            int colonIdx = jsonStr.indexOf(':', ctIdx + 8);
+            if (colonIdx < 0) return jsonStr;
+            
+            // 找到值的起始引号（跳过空白）
+            int valStart = colonIdx + 1;
+            while (valStart < jsonStr.length() && Character.isWhitespace(jsonStr.charAt(valStart))) {
+                valStart++;
             }
-
-            return sb.toString();
+            if (valStart >= jsonStr.length() || jsonStr.charAt(valStart) != '"') return jsonStr;
+            valStart++; // 跳过起始引号
+            
+            // 从末尾往前找值的结束引号（后跟 , 或 } 或 ]）
+            int valEnd = -1;
+            for (int i = jsonStr.length() - 1; i > valStart; i--) {
+                if (jsonStr.charAt(i) == '"') {
+                    int j = i + 1;
+                    while (j < jsonStr.length() && Character.isWhitespace(jsonStr.charAt(j))) {
+                        j++;
+                    }
+                    if (j < jsonStr.length()) {
+                        char next = jsonStr.charAt(j);
+                        if (next == ',' || next == '}' || next == ']') {
+                            valEnd = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (valEnd <= valStart) return jsonStr;
+            
+            // 提取值内容，转义内部的 "，然后重新组装
+            String content = jsonStr.substring(valStart, valEnd);
+            String escaped = content.replace("\"", "\\\"");
+            
+            return jsonStr.substring(0, valStart) + escaped + jsonStr.substring(valEnd);
         }
 
         /**
