@@ -127,16 +127,6 @@ public class ToolManager {
                             .put("arguments", new JSONObject().put("参数名", "参数值")))
                     .put("id", 1001));
             formats.put(fmt2);
-
-            JSONObject fmt3 = new JSONObject();
-            fmt3.put("type", "system");
-            fmt3.put("desc", "系统指令：服务端在后续轮次中发送的指令或计划推进消息，格式为 result 对象含 type=system 和 content 字段。你收到后按指令执行，回复格式依然遵循 reply/tool_call 规则");
-            fmt3.put("example", new JSONObject()
-                    .put("jsonrpc", "2.0")
-                    .put("result", new JSONObject().put("type", "system").put("content", "系统指令内容"))
-                    .put("id", 1001));
-            formats.put(fmt3);
-
             prompt.put("reply_formats", formats);
 
             // 核心规则
@@ -160,6 +150,15 @@ public class ToolManager {
             rules.put("执行 Python 代码时直接使用 python 工具，不要用 shell which python 或 shell python3 等方式");
             rules.put("JSON 字符串值内的双引号必须转义为 \\\"（反斜杠加引号），否则 JSON 解析失败。Python 代码中优先使用单引号避免冲突");
             prompt.put("rules", rules);
+
+            // ============================================================
+            // 服务端消息格式（Server → LLM，非首轮）
+            // 首轮发送 initialize，后续轮次服务端可能发送以下格式的消息
+            // ============================================================
+            JSONObject serverMsgs = new JSONObject();
+            serverMsgs.put("工具结果", "工具执行后返回 JSON-RPC 格式结果：{\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"...\"}]},\"id\":1001}");
+            serverMsgs.put("系统指令", "计划推进或流程控制指令：{\"jsonrpc\":\"2.0\",\"result\":{\"type\":\"system\",\"content\":\"请按计划执行第一个任务...\"},\"id\":1001}。收到后按指令执行，回复格式依然遵循 reply/tool_call 规则");
+            prompt.put("server_messages", serverMsgs);
 
             // ============================================================
             // 工作流状态机（FSM）
