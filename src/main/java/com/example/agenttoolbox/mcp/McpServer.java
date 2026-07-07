@@ -813,7 +813,7 @@ public class McpServer {
                             final int currentRound = round;
                             
                             String messageToSend = currentMessage;
-                            if (round == 1 && cachedSession != null && cachedSession.isFirstMessage) {
+                            if (round == 1 && cachedSession != null && cachedSession.isFirstMessage && !bridge.isDeepseekInitialized()) {
                                 // 首次消息：发送完整 system + tools + user
                                 try {
                                     JSONObject rpc = new JSONObject();
@@ -828,11 +828,12 @@ public class McpServer {
                                     // 标记已发送过 system+tools，后续消息不再携带
                                     cachedSession.isFirstMessage = false;
                                     log("[SESSION] 首次消息: 发送完整 system+tools (" + messageToSend.length() + "字符)");
+                                    bridge.setDeepseekInitialized(true);
                                 } catch (JSONException e) {
                                     messageToSend = cachedSession.systemPrompt;
                                 }
                                 log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
-                            } else if (round == 1 && cachedSession == null) {
+                            } else if (round == 1 && cachedSession == null && !bridge.isDeepseekInitialized()) {
                                 // 兜底：无缓存时生成 system prompt
                                 String systemPrompt = ToolManager.getInstance().getSystemPrompt();
                                 try {
@@ -849,6 +850,7 @@ public class McpServer {
                                 } catch (JSONException e) {
                                     messageToSend = systemPrompt;
                                 }
+                                bridge.setDeepseekInitialized(true);
                                 log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
                             }
                             

@@ -64,6 +64,18 @@ public class DeepSeekChatBridge {
         AppLogger.d("DeepSeekChatBridge", "已注册 WebView: " + (webView != null ? "有效" : "null"));
     }
 
+    // 全局标记：DeepSeek 页面是否已完成 initialize（含系统提示词和工具列表）
+    // 同一个 DeepSeek 页面只需要初始化一次，后续请求不应重复发送
+    private volatile boolean deepseekInitialized = false;
+
+    public boolean isDeepseekInitialized() {
+        return deepseekInitialized;
+    }
+
+    public void setDeepseekInitialized(boolean initialized) {
+        this.deepseekInitialized = initialized;
+    }
+
     // Activity 返回/销毁时调用：保持 WebView 存活
     public synchronized void detach() {
         AppLogger.d("DeepSeekChatBridge", "detach: WebView 保持存活");
