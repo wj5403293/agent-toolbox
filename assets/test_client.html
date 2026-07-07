@@ -933,14 +933,10 @@
 
         /* ===== 聊天区内嵌计划面板 ===== */
         .chat-plan-panel {
-            background: #fafcff;
-            border: 1px solid #e9edf2;
-            border-radius: 20px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
             overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            flex: 0 0 auto;
-            min-height: 0;
+            flex-shrink: 0;
         }
         .chat-plan-header {
             padding: 8px 14px;
@@ -1248,20 +1244,20 @@
                     <textarea id="chatInput" placeholder="输入消息…" rows="1" onkeydown="handleKeyDown(event)"></textarea>
                     <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
                 </div>
-            </div>
-        </div>
 
-        <!-- ===== 待办计划（会话窗口下方的独立分区） ===== -->
-        <div class="chat-plan-panel" id="chatPlanPanel" style="display:none;">
-            <div class="chat-plan-header" onclick="toggleChatPlan()">
-                <span style="display:flex; align-items:center; gap:6px;">
-                    <span id="chatPlanToggle">▶</span>
-                    待办计划
-                </span>
-                <span class="count" id="planCount">-</span>
-            </div>
-            <div class="chat-plan-body" id="planBody">
-                <div class="plan-empty">等待计划加载…</div>
+                <!-- 内嵌待办计划（可折叠），位于聊天窗口底部、对话下方 -->
+                <div class="chat-plan-panel" id="chatPlanPanel" style="display:none;">
+                    <div class="chat-plan-header" onclick="toggleChatPlan()">
+                        <span style="display:flex; align-items:center; gap:6px;">
+                            <span id="chatPlanToggle">▶</span>
+                            待办计划
+                        </span>
+                        <span class="count" id="planCount">-</span>
+                    </div>
+                    <div class="chat-plan-body" id="planBody">
+                        <div class="plan-empty">等待计划加载…</div>
+                    </div>
+                </div>
             </div>
         </div>
 
