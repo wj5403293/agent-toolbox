@@ -1202,6 +1202,22 @@ public class McpServer {
                                                 currentMessage = "所有任务已完成。\n\n" + summary;
                                             }
                                             finalDone = true;
+
+                                            // 关键修复（与工具分支一致）：主动推送完成总结给前端
+                                            try {
+                                                writePlanEvent(out, cachedSession.planState, "complete");
+                                                JSONObject doneJ = new JSONObject();
+                                                doneJ.put("content", summary);
+                                                doneJ.put("round", currentRound);
+                                                doneJ.put("isToolCall", false);
+                                                doneJ.put("planComplete", true);
+                                                doneJ.put("canContinue", false);
+                                                writeEventChunk(out, "done", doneJ.toString());
+                                                flushWriteHandler();
+                                                log("[PLAN] 完成总结已推送至前端");
+                                            } catch (Exception e) {
+                                                log("[PLAN] 推送完成总结失败: " + e.getMessage());
+                                            }
                                             break;
                                         }
                                     }
@@ -1357,8 +1373,26 @@ public class McpServer {
                                     log("[PLAN] 所有任务已完成！");
                                     String summary = cachedSession.taskManager.generateSummary(cachedSession.planState);
                                     finalDone = true;
-                                    // 附加总结到最终消息
+                                    // 附加总结到最终消息（仅供调试/日志参考；finalDone 后主循环不会再有下一轮）
                                     currentMessage = currentMessage + "\n\n" + summary;
+
+                                    // 关键修复：finalDone=true 后主循环不会进入下一轮 LLM 对话，
+                                    // 因此必须主动把"完成总结"推送给前端。否则前端只会停在上一轮
+                                    // （文本回复或工具调用状态），永远看不到最终总结。
+                                    try {
+                                        writePlanEvent(out, cachedSession.planState, "complete");
+                                        JSONObject doneJ = new JSONObject();
+                                        doneJ.put("content", summary);
+                                        doneJ.put("round", currentRound);
+                                        doneJ.put("isToolCall", false);
+                                        doneJ.put("planComplete", true);
+                                        doneJ.put("canContinue", false);
+                                        writeEventChunk(out, "done", doneJ.toString());
+                                        flushWriteHandler();
+                                        log("[PLAN] 完成总结已推送至前端");
+                                    } catch (Exception e) {
+                                        log("[PLAN] 推送完成总结失败: " + e.getMessage());
+                                    }
                                 }
                             }
 

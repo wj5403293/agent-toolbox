@@ -515,6 +515,15 @@
             border: 1px solid #e9edf2;
             border-bottom-left-radius: 4px;
         }
+        /* 计划完成总结气泡：绿色强调，突出最终结果 */
+        .message-bubble.complete {
+            background: #f0fdf4;
+            border: 1px solid #86efac;
+            box-shadow: 0 1px 3px rgba(16, 122, 60, 0.12);
+        }
+        .message-bubble.complete .md-body h2 {
+            color: #15803d;
+        }
         .json-block {
             background: #f8fafc;
             padding: 10px 12px;
@@ -2778,7 +2787,13 @@
                             } else if (obj.content.length > 0) {
                                 finalContent = obj.content;
                                 gotContent = true;
-                                setState('完成');
+                                // 服务端计划全部完成时推送的 done 事件：标记为最终完成总结
+                                if (obj.planComplete === true) {
+                                    bubbleEl.classList.add('complete');
+                                    setState('计划已完成');
+                                } else {
+                                    setState('完成');
+                                }
                             }
                         }
                         if (obj && obj.canContinue === true) {
