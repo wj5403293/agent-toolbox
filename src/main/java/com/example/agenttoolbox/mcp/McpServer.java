@@ -1118,6 +1118,62 @@ public class McpServer {
                                     }
                                 }
                                 
+                                // 检测 result 中是否包含 plan_update（LLM 驱动计划更新）
+                                if (resultObj != null && resultObj.has("plan_update") && cachedSession != null) {
+                                    JSONObject planUpdate = resultObj.optJSONObject("plan_update");
+                                    if (planUpdate != null) {
+                                        log("[PLAN] 检测到计划更新指令: " + planUpdate.toString());
+                                        String action = planUpdate.optString("action", "");
+                                        TaskManager tm = cachedSession.taskManager;
+                                        
+                                        switch (action) {
+                                            case "complete_task":
+                                            case "mark_done": {
+                                                String taskId = planUpdate.optString("task_id", "");
+                                                if (!taskId.isEmpty()) {
+                                                    tm.markTaskDone(cachedSession.planState, taskId);
+                                                } else if (cachedSession.planState.activeTask != null) {
+                                                    tm.markCurrentDone(cachedSession.planState);
+                                                }
+                                                break;
+                                            }
+                                            case "mark_failed": {
+                                                String taskId = planUpdate.optString("task_id", "");
+                                                String reason = planUpdate.optString("reason", "未知错误");
+                                                if (!taskId.isEmpty()) {
+                                                    tm.markTaskFailed(cachedSession.planState, taskId, reason);
+                                                }
+                                                break;
+                                            }
+                                            case "update_plan": {
+                                                JSONObject newPlan = planUpdate.optJSONObject("plan");
+                                                if (newPlan != null && newPlan.has("tasks")) {
+                                                    tm.loadPlan(cachedSession.planState, newPlan);
+                                                    cachedSession.planState.confirmed = true;
+                                                    writePlanEvent(out, cachedSession.planState, "updated");
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        
+                                        writePlanEvent(out, cachedSession.planState, "progress");
+                                        log("[PLAN] " + cachedSession.planState.getSummary());
+                                        
+                                        // 选择下一个任务
+                                        Task nextTask = tm.selectNextTask(cachedSession.planState);
+                                        if (nextTask != null) {
+                                            String planContext = cachedSession.planState.toPromptText();
+                                            currentMessage = planContext + "\n\n[系统指令] 下一步任务: [" + nextTask.taskId + "] " + nextTask.content + "。请调用对应工具执行。";
+                                            continue;
+                                        } else if (cachedSession.planState.allCompleted()) {
+                                            String summary = cachedSession.taskManager.generateSummary(cachedSession.planState);
+                                            currentMessage = "所有任务已完成。\n\n" + summary;
+                                            finalDone = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
                                 // 普通文本回复，对话结束
                                 finalDone = true;
                                 log("[DONE] 文本回复");
@@ -1202,20 +1258,8 @@ public class McpServer {
                                 updateSessionState(cachedSession, toolNameForLog, replyJson.optJSONObject("params"), toolResult);
                             }
 
-                            // 待办计划：更新任务进度
-                            if (cachedSession != null && !toolIsError) {
-                                TaskManager tm = cachedSession.taskManager;
-                                // 如果有活跃任务，标记完成
-                                if (cachedSession.planState.activeTask != null) {
-                                    tm.markCurrentDone(cachedSession.planState);
-                                    log("[PLAN] " + cachedSession.planState.getSummary());
-                                }
-                                // 选取下一个任务
-                                Task nextTask = tm.selectNextTask(cachedSession.planState);
-                                if (nextTask != null) {
-                                    log("[PLAN] 下一任务: [" + nextTask.taskId + "] " + nextTask.content);
-                                }
-                                // 推送 plan 进度到前端
+                            // 待办计划：推送进度到前端（不由系统自动推进，由 LLM 通过 plan_update 控制）
+                            if (cachedSession != null) {
                                 writePlanEvent(out, cachedSession.planState, "progress");
                             }
 

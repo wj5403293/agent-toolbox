@@ -262,10 +262,10 @@ public class ToolManager {
             planUsage.put("示例：{\"jsonrpc\":\"2.0\",\"result\":{\"type\":\"reply\",\"content\":\"{\\\"tasks\\\":[{\\\"task_id\\\":\\\"T001\\\",...}]}\"},\"id\":1001}");
             planUsage.put("禁止在 content 字段外部或附加在回复末尾输出计划 JSON，必须将其作为 content 字符串的内部内容");
             planUsage.put("系统会自动检测并解析计划 JSON，推送到前端待办面板");
-            planUsage.put("系统按依赖+优先级自动选取下一个任务，注入到你的下一轮消息中");
-            planUsage.put("每个任务完成后系统自动推进到下一个，全程无需手动管理");
-            planUsage.put("如果任务失败，系统会通知你并附上失败原因，你可以修正计划");
-            planUsage.put("不要在一次回复中同时输出计划 JSON 和工具调用，计划放在文本回复中即可");
+            planUsage.put("工具执行后，你可以在文本回复的 result 对象中添加 plan_update 字段来推进计划。系统解析后会把下一个任务状态发给你");
+            planUsage.put("plan_update 格式：{\"action\":\"操作类型\",\"task_id\":\"T001\",\"reason\":\"失败原因（可选）\"}");
+            planUsage.put("支持的操作类型：complete_task（标记完成）、mark_failed（标记失败，需提供 reason）、update_plan（更新整个计划，需提供 plan 字段）");
+            planUsage.put("示例：{\"jsonrpc\":\"2.0\",\"result\":{\"type\":\"reply\",\"content\":\"任务已完成\",\"plan_update\":{\"action\":\"complete_task\",\"task_id\":\"T001\"}},\"id\":1001}");
             planSystem.put("usage", planUsage);
 
             prompt.put("plan_system", planSystem);

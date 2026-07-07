@@ -115,6 +115,35 @@ public class TaskManager {
     }
 
     /**
+     * 标记指定 ID 的任务完成
+     */
+    public void markTaskDone(PlanState planState, String taskId) {
+        for (Task t : planState.tasks) {
+            if (t.taskId.equals(taskId) && t.status == Task.Status.IN_PROGRESS) {
+                t.markCompleted();
+                planState.activeTask = null;
+                planState.resetRoundCount();
+                break;
+            }
+        }
+    }
+
+    /**
+     * 标记指定 ID 的任务失败
+     */
+    public void markTaskFailed(PlanState planState, String taskId, String reason) {
+        for (Task t : planState.tasks) {
+            if (t.taskId.equals(taskId)) {
+                t.markFailed(reason);
+                if (t.canRetry()) t.resetToPending();
+                if (planState.activeTask == t) planState.activeTask = null;
+                planState.resetRoundCount();
+                break;
+            }
+        }
+    }
+
+    /**
      * 触发重规划：保留已完成任务，重置未完成任务
      */
     public JSONObject buildReplanContext(PlanState planState) {
