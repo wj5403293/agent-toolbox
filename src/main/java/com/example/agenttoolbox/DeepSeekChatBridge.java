@@ -192,20 +192,31 @@ public class DeepSeekChatBridge {
                     @Override
                     public void run() {
                         try {
-                            // 延长到 3600 秒（1 小时），让 JavaScript 轮询循环的动态超时真正控制
-                            // JavaScript 端已有 pollCount 检查（600/900/1800 = 5/7.5/15 分钟）
-                            boolean completed = latch.await(3600, TimeUnit.SECONDS);
-                            String reply = replyRef.get();
-                            String err = errorRef.get();
+                            // 第一阶段：等待 JS observer 捕获回复（30 秒）
+                            // 正常情况下 observer 会在几秒内捕获 LLM 回复
+                            boolean completed = latch.await(30, TimeUnit.SECONDS);
                             StreamCallback cb = callbacksById.get(requestId);
                             if (!completed) {
-                                if (cb != null) cb.onError("流式等待超时（3600s，JavaScript 端未触发完成）");
-                            } else if (err != null) {
-                                if (cb != null) cb.onError(err);
-                            } else if (reply != null) {
-                                if (cb != null) cb.onDone(reply);
-                            } else {
-                                if (cb != null) cb.onError("未收到回复");
+                                // observer 未触发，尝试 Java 端兜底：直接 JS 提取 DOM 内容
+                                AppLogger.w("DeepSeekChatBridge",
+                                    "[" + requestId + "] observer 未捕获回复，触发兜底 DOM 提取");
+                                tryExtractFromDOMAndRelease(requestId);
+                                // 第二阶段：等待兜底提取结果（额外 15 秒）
+                                completed = latch.await(15, TimeUnit.SECONDS);
+                                cb = callbacksById.get(requestId);
+                            }
+                            String reply = replyRef.get();
+                            String err = errorRef.get();
+                            if (cb != null) {
+                                if (err != null) {
+                                    cb.onError(err);
+                                } else if (reply != null && !reply.isEmpty()) {
+                                    cb.onDone(reply);
+                                } else if (completed) {
+                                    cb.onError("收到回复为空");
+                                } else {
+                                    cb.onError("等待超时，JavaScript 端未触发完成");
+                                }
                             }
                         } catch (InterruptedException e) {
                             StreamCallback cb = callbacksById.get(requestId);
