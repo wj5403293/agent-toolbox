@@ -493,8 +493,14 @@ public class DeepSeekChatBridge {
             "    if (parsed.result) {\n" +
             "      var result = parsed.result;\n" +
             "      var content = result.content || result.text || '';\n" +
-            "      Android.log('[JS] 文本回复: type=' + (result.type || 'unknown') + ', content=' + content);\n" +
-            "      finish(content || JSON.stringify(parsed));\n" +
+            "      // 如果包含 plan_update，传递完整 JSON 让 Java 解析计划更新\n" +
+            "      if (result.plan_update) {\n" +
+            "        Android.log('[JS] 文本回复(含plan_update): content=' + content);\n" +
+            "        finish(JSON.stringify(parsed));\n" +
+            "      } else {\n" +
+            "        Android.log('[JS] 文本回复: type=' + (result.type || 'unknown') + ', content=' + content);\n" +
+            "        finish(content || JSON.stringify(parsed));\n" +
+            "      }\n" +
             "      return;\n" +
             "    }\n" +
             "\n" +

@@ -143,6 +143,10 @@ public class Task {
         t.content = json.optString("content");
         t.desc = json.optString("desc", null);
         t.status = parseStatus(json.optString("status", "pending"));
+        // 兼容 LLM 可能使用的 "completed": true 布尔字段
+        if (t.status == Task.Status.PENDING && json.has("completed")) {
+            t.status = json.optBoolean("completed", false) ? Task.Status.COMPLETED : Task.Status.PENDING;
+        }
         t.priority = json.optInt("priority", 3);
         JSONArray deps = json.optJSONArray("deps");
         if (deps != null) for (int i = 0; i < deps.length(); i++) t.deps.add(deps.optString(i));

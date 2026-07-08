@@ -970,8 +970,9 @@ public class McpServer {
                                                                     log("[LLM] result.content: " + extractedContent.length());
                                                                     // 如果 content 是待办计划 JSON，保留外层 JSON-RPC 包装，
                                                                     // 让主循环的 hasResult 分支正确检测 plan
-                                                                    if (extractedContent.trim().startsWith("{\"tasks\"")) {
-                                                                        log("[LLM] result.content 是计划 JSON，保留外层包装");
+                                                                    if (extractedContent.trim().startsWith("{\"tasks\"")
+                                                                        || resultJson.has("plan_update")) {
+                                                                        log("[LLM] result.content 是计划 JSON 或含 plan_update，保留外层包装");
                                                                         // finalReply 不变，保持完整的 JSON-RPC 消息
                                                                     } else {
                                                                         finalReply = extractedContent;
