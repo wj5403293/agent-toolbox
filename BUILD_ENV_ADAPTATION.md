@@ -41,7 +41,7 @@ zipStorePath=wrapper/dists
 **新增属性**:
 ```properties
 org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-org.gradle.java.home=/usr/lib/jvm/java-17-openjdk
+org.gradle.java.home=/data/user/0/aidepro.top/files/framework/jdk
 android.useAndroidX=true
 kotlin.code.style=official
 ```
