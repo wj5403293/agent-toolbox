@@ -30,8 +30,8 @@ zipStorePath=wrapper/dists
 - 添加 Kotlin stdlib 依赖
 
 **AGP 版本选择**:
-- AGP 7.4.2 是 Gradle 7.5.1 的兼容版本
-- AGP 7.4.x 要求 Gradle 7.5+
+- AGP 7.2.1 是 Gradle 7.5.1 的兼容版本
+- AGP 7.2.x 要求 Gradle 7.3.3+
 
 ### 3. 更新 settings.gradle
 **变更**:
@@ -87,7 +87,7 @@ gradle wrapper --gradle-version 7.5.1
 ## 依赖项
 
 ### Gradle 插件
-- Android Gradle Plugin: 7.4.2
+- Android Gradle Plugin: 7.2.1
 - Kotlin Gradle Plugin: 1.6.21
 
 ### 项目依赖
