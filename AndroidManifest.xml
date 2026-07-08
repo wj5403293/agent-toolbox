@@ -39,6 +39,7 @@
         
         <activity
             android:name=".MainActivity"
+            android:exported="true"
             android:label="Agent工具箱 - MCP服务端">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
