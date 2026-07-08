@@ -838,8 +838,8 @@ public class McpServer {
                                 log("[INIT] 系统提示词: " + messageToSend.length() + " 字符");
                             }
                             
-                            // 非首轮消息：如果不是 JSON-RPC 格式，包装为 JSON-RPC system 指令
-                            if (round > 1 && !messageToSend.trim().startsWith("{")) {
+                            // 非首轮消息或首轮但未发 initialize 时：如果不是 JSON-RPC 格式，包装为 JSON-RPC system 指令
+                            if (round >= 1 && !messageToSend.trim().startsWith("{")) {
                                 try {
                                     JSONObject rpc = new JSONObject();
                                     rpc.put("jsonrpc", "2.0");
