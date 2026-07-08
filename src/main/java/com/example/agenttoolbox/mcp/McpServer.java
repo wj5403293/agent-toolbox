@@ -989,7 +989,9 @@ public class McpServer {
                                                     log("[LLM] 提取result失败: " + extractEx.getMessage() + "，使用原始回复");
                                                 }
                                             }
-                                            roundReplyRef.set(finalReply);
+                                            // roundReplyRef 存原始 JSON-RPC（主循环需要完整 JSON 来判断工具调用/文本回复）
+                                            // finalReply 用于前端显示和日志
+                                            roundReplyRef.set(cleanReply);
 
                                             // P2 修复：记录 LLM 完整回复（非工具调用时），使用截断防止过长日志
                                             if (!isToolCall && finalReply.length() > 0) {
