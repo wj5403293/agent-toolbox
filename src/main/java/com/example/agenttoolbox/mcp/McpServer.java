@@ -844,7 +844,7 @@ public class McpServer {
                                     JSONObject rpc = new JSONObject();
                                     rpc.put("jsonrpc", "2.0");
                                     JSONObject result = new JSONObject();
-                                    result.put("type", "system");
+                                    result.put("type", "user");
                                     result.put("content", messageToSend);
                                     rpc.put("result", result);
                                     rpc.put("id", conversationId);
