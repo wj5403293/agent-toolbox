@@ -2963,7 +2963,14 @@
                         if (sp && sp.result && sp.tool) {
                             const cardEl = addToolResultCard(sp.tool, sp.result, sp.isError);
                             if (cardEl && msgEl && msgEl.parentNode) {
-                                msgEl.parentNode.insertBefore(cardEl, msgEl);
+                                // 确保工具卡片是 AI 消息的兄弟元素（而非子元素）
+                                if (msgEl.parentNode === chatMessages) {
+                                    chatMessages.insertBefore(cardEl, msgEl);
+                                } else {
+                                    chatMessages.appendChild(cardEl);
+                                }
+                                // 额外间距
+                                cardEl.style.marginBottom = '16px';
                             }
                         }
                     } else if (eventName === 'plan') {
