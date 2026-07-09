@@ -287,7 +287,7 @@ public class DeepSeekChatBridge {
             "  var initialLastAiLen = 0;\n" +
             "  if (initialAiCount > 0) {\n" +
             "    var lastAiInit = diagInitial[initialAiCount - 1];\n" +
-            "    initialLastAiLen = (lastAiInit.textContent || lastAiInit.innerText || '').trim().length;\n" +
+            "    initialLastAiLen = extractReply(lastAiInit).length;\n" +
             "  }\n" +
             "  Android.log('[JS] 初始AI回复数=' + initialAiCount + ', initialLastAiLen=' + initialLastAiLen + ', url=' + window.location.href);\n" +
             "  // 选择器探测：输出多种可能选择器的匹配数，定位正确的 AI 回复元素\n" +
@@ -333,18 +333,26 @@ public class DeepSeekChatBridge {
             "    Android.onDeepSeekReply(__rid, reply || '');\n" +
             "  }\n" +
             "\n" +
-            "  // 从 AI 回复元素中提取 JSON-RPC 内容\n" +
+            "  // 从 AI 回复元素中提取 JSON-RPC 内容：抓取渲染后的 markdown 原始内容\n" +
+            "  // 定位 p.ds-markdown-paragraph（段落）与 pre（代码块），逐子节点拼接 span/code/文本，\n" +
+            "  // 保留原始内容（code 内不做 markdown 改写，__name__ 等原样保留）\n" +
             "  function extractReply(el) {\n" +
-            "    // 优先从 span 中提取（文档：AI 回复在 .ds-assistant-message-main-content span）\n" +
-            "    var span = el.querySelector('.ds-assistant-message-main-content span');\n" +
-            "    var rawText = '';\n" +
-            "    if (span) {\n" +
-            "      rawText = (span.textContent || span.innerText || '').trim();\n" +
+            "    if (!el) return '';\n" +
+            "    var blocks = el.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
+            "    if (blocks.length === 0) {\n" +
+            "      return (el.textContent || el.innerText || '').trim();\n" +
             "    }\n" +
-            "    if (!rawText) {\n" +
-            "      rawText = (el.textContent || el.innerText || '').trim();\n" +
+            "    var out = [];\n" +
+            "    for (var bi = 0; bi < blocks.length; bi++) {\n" +
+            "      var b = blocks[bi];\n" +
+            "      var txt = '';\n" +
+            "      var kids = b.childNodes;\n" +
+            "      for (var ki = 0; ki < kids.length; ki++) {\n" +
+            "        txt += (kids[ki].textContent || '');\n" +
+            "      }\n" +
+            "      if (txt.trim()) out.push(txt.trim());\n" +
             "    }\n" +
-            "    return rawText;\n" +
+            "    return out.join('\\n');\n" +
             "  }\n" +
             "\n" +
             "  // 解析 JSON-RPC 并提取内容\n" +
@@ -495,26 +503,19 @@ public class DeepSeekChatBridge {
             "    // DeepSeek 替换最后一个 AI 元素内容而非新增元素，需同时检测元素数和内容变化\n" +
             "    var aiMsgs = document.querySelectorAll('.ds-assistant-message-main-content');\n" +
             "    var hasNewContent = false;\n" +
+            "    var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
+            "    var rawText = extractReply(lastAi);\n" +
+            "    var currentLen = rawText.length;\n" +
             "    if (aiMsgs.length > initialAiCount) {\n" +
             "      hasNewContent = true;  // 新增了 AI 元素\n" +
             "    } else if (aiMsgs.length > 0) {\n" +
-            "      var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
-            "      var currentLen = (lastAi.textContent || lastAi.innerText || '').trim().length;\n" +
             "      if (currentLen !== initialLastAiLen) {\n" +
             "        hasNewContent = true;  // 最后一个元素内容变化（替换，可能变短）\n" +
             "      }\n" +
             "    }\n" +
             "    if (!hasNewContent) return;\n" +
             "\n" +
-            "    // 取最新的 AI 回复元素\n" +
-            "    var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
-            "\n" +
-            "    // 提取文本：优先用元素完整文本，span 可能只包含部分内容\n" +
-            "    var fullText = (lastAi.textContent || lastAi.innerText || '').trim();\n" +
-            "    var span = lastAi.querySelector('span');\n" +
-            "    var spanText = span ? (span.textContent || span.innerText || '').trim() : '';\n" +
-            "    // 取两者中更长的（span 可能截断，元素可能包含多余内容）\n" +
-            "    var rawText = spanText.length > fullText.length ? spanText : fullText;\n" +
+            "    // 提取文本：从 p.ds-markdown-paragraph / pre 抓取，遍历 span/code 子节点保留原始内容\n" +
             "    if (!rawText || rawText.length < 2) return;\n" +
             "\n" +
             "    // 稳定性检查：文本停止变化 3 次（1.5 秒）\n" +
@@ -820,10 +821,22 @@ public class DeepSeekChatBridge {
                     "    '.ds-markdown',\n" +
                     "    '[class*=\"assistant-message\"]'\n" +
                     "  ];\n" +
+                    "  function mdText(el) {\n" +
+                    "    if (!el) return '';\n" +
+                    "    var blocks = el.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
+                    "    if (blocks.length === 0) return (el.textContent || el.innerText || '').trim();\n" +
+                    "    var out = [];\n" +
+                    "    for (var bi = 0; bi < blocks.length; bi++) {\n" +
+                    "      var b = blocks[bi]; var t = ''; var ks = b.childNodes;\n" +
+                    "      for (var ki = 0; ki < ks.length; ki++) t += (ks[ki].textContent || '');\n" +
+                    "      if (t.trim()) out.push(t.trim());\n" +
+                    "    }\n" +
+                    "    return out.join('\\n');\n" +
+                    "  }\n" +
                     "  for (var i = 0; i < selectors.length; i++) {\n" +
                     "    var els = document.querySelectorAll(selectors[i]);\n" +
                     "    if (els && els.length > 0) {\n" +
-                    "      var txt = (els[els.length - 1].textContent || els[els.length - 1].innerText || '').trim();\n" +
+                    "      var txt = mdText(els[els.length - 1]);\n" +
                     "      if (txt && txt.length > 5) return txt;\n" +
                     "    }\n" +
                     "  }\n" +
