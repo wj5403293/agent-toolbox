@@ -70,11 +70,16 @@ public class SkillManager {
 
     private void discover() {
         if (context == null) return;
-        File base = new File(context.getExternalFilesDir(null), "skills");
-        if (!base.exists()) base.mkdirs();
-        Log.i(TAG, "运行时技能目录: " + base.getAbsolutePath());
+        File extDir = context.getExternalFilesDir(null);
+        File base = (extDir != null) ? new File(extDir, "skills") : null;
+        if (base != null) {
+            if (!base.exists()) base.mkdirs();
+            Log.i(TAG, "运行时技能目录: " + base.getAbsolutePath());
+        } else {
+            Log.w(TAG, "无法获取外部存储，运行时技能不可用");
+        }
         discoverAssets();
-        discoverRuntime();
+        if (base != null) discoverRuntime(base);
         Log.i(TAG, "已加载 " + skills.size() + " 个技能，注册工具 " + registeredToolNames.size() + " 个");
         for (Skill s : skills) {
             Log.i(TAG, "  技能: " + s.id + " (from=" + (s.fromAssets ? "assets" : "runtime") + ")");
@@ -139,8 +144,7 @@ public class SkillManager {
     }
 
     // ============ 发现：运行时外部目录 ============
-    private void discoverRuntime() {
-        File base = new File(context.getExternalFilesDir(null), "skills");
+    private void discoverRuntime(File base) {
         if (!base.exists() || !base.isDirectory()) {
             Log.d(TAG, "运行时技能目录不存在: " + base.getAbsolutePath());
             return;
@@ -266,9 +270,10 @@ public class SkillManager {
 
     /** 返回运行时技能目录的绝对路径，用于告知用户技能安装位置 */
     public synchronized String getRuntimeSkillsPath() {
-        if (context == null) return null;
-        File base = new File(context.getExternalFilesDir(null), "skills");
-        return base.getAbsolutePath();
+        if (context == null) return "（Context 不可用）";
+        File extDir = context.getExternalFilesDir(null);
+        if (extDir == null) return "（无法获取外部存储路径）";
+        return new File(extDir, "skills").getAbsolutePath();
     }
 
     /** 供 SkillReadTool 使用：返回 SKILL.md 正文，或 references 下某文件内容 */
