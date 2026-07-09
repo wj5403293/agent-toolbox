@@ -66,7 +66,8 @@
     "file_write 模式：replace=替换行，insert=行前插入，append=末尾追加。优先用 insert/append 避免行号偏移",
     "Python：直接调用 python 工具，不要用 shell which python 或 shell python3。禁止 os.system/subprocess/ctypes",
     "Python script 字段格式（致命）：换行用 JSON 转义换行符（反斜杠+n），缩进必须是 4 个空格字符的倍数（直接写在字符串中，不要转义、不要用 Tab、不要用 1~3 个空格）；代码内双引号转义为反斜杠+双引号、反斜杠转义为两个反斜杠。缩进不是 4 的倍数会直接导致 IndentationError",
-    "GM 流程：检查Root → 进程列表 → 附加进程 → 搜索 → 读写"
+    "GM 流程：检查Root → 进程列表 → 附加进程 → 搜索 → 读写",
+    "MT 与 APK MCP：mt_apk_* 系列工具依赖 MT 管理器内部的 APK MCP 服务。调用前先回复用户告知「请在 MT 管理器中打开侧拉栏 → 工具 → APK MCP，点击启动」，等用户启动后再继续调用。若返回「APK MCP 未连接」说明服务未运行，同样引导用户启动"
   ],
   "server_messages": {
     "工具结果": "工具执行结果，附带 plan 进度：{\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"结果\"}]},\"plan\":{\"total\":5,\"completed\":1,\"failed\":0,\"active_task\":\"T002\"},\"id\":1001}",
