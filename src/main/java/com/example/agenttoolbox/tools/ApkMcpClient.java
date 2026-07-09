@@ -219,28 +219,29 @@ public class ApkMcpClient {
             os.close();
 
             int code = conn.getResponseCode();
-            if (code != 200) {
-                // 读错误流看看 MT 返回了什么
-                String errBody = "";
+            // 接受任何 2xx 状态码（MT 可能返回 201/202 而非 200）
+            String respStr;
+            if (code >= 200 && code < 300) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                respStr = sb.toString();
+            } else {
+                // 非 2xx：读错误流并尝试解析 JSON（有些 JSON-RPC 服务器在 4xx/5xx 也带了错误体）
                 try {
                     BufferedReader errReader = new BufferedReader(new InputStreamReader(conn.getErrorStream(), "UTF-8"));
                     StringBuilder eb = new StringBuilder();
                     String el;
                     while ((el = errReader.readLine()) != null) eb.append(el);
                     errReader.close();
-                    errBody = eb.toString();
-                } catch (Exception ignored) {}
-                Log.w(TAG, "HTTP " + code + " for " + method + " body=" + errBody);
-                return null;
+                    respStr = eb.toString().trim();
+                } catch (Exception ignored) { respStr = ""; }
+                Log.w(TAG, "HTTP " + code + " for " + method + " body=" + respStr);
+                if (respStr.isEmpty()) return null;
+                // 尝试把错误体当 JSON 解析（可能含 error 字段）
             }
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-            reader.close();
 
             String respStr = sb.toString();
             if (respStr.isEmpty()) return null;
