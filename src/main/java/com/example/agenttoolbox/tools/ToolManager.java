@@ -320,7 +320,28 @@ public class ToolManager {
                 }
                 return client.callTool(name, arguments);
             }
-            
+
+            // skills/list 和 skills/reload 既是 MCP 方法也支持 tools/call 调用
+            if ("skills/list".equals(name)) {
+                com.example.agenttoolbox.skills.SkillManager sm = com.example.agenttoolbox.skills.SkillManager.getInstance();
+                JSONArray list = sm.getSkillSummaries();
+                contentItem.put("type", "text");
+                contentItem.put("text", "已加载 " + list.length() + " 个技能:\n" + list.toString(2));
+                content.put(contentItem);
+                result.put("content", content);
+                return result;
+            }
+            if ("skills/reload".equals(name)) {
+                com.example.agenttoolbox.skills.SkillManager sm = com.example.agenttoolbox.skills.SkillManager.getInstance();
+                sm.reload();
+                JSONArray list = sm.getSkillSummaries();
+                contentItem.put("type", "text");
+                contentItem.put("text", "技能已重载，当前 " + list.length() + " 个:\n" + list.toString(2));
+                content.put(contentItem);
+                result.put("content", content);
+                return result;
+            }
+
             Tool tool = tools.get(name);
             if (tool == null) {
                 result.put("isError", true);
