@@ -407,6 +407,27 @@ public class DeepSeekChatBridge {
             "    return JSON.stringify({ jsonrpc: '2.0', validation_error: reason, id: id });\n" +
             "  }\n" +
             "\n" +
+            "  function validatePythonScript(script) {\n" +
+            "    if (typeof script !== 'string') return null;\n" +
+            "    var lines = script.split('\\n');\n" +
+            "    var depth = 0;\n" +
+            "    for (var i = 0; i < lines.length; i++) {\n" +
+            "      var line = lines[i];\n" +
+            "      if (line.trim() === '') continue;\n" +
+            "      if (line.trim().charAt(0) === '#') continue;\n" +
+            "      var lead = line.length - line.replace(/^[ \\t]+/, '').length;\n" +
+            "      if (depth === 0 && lead !== 0 && lead % 4 !== 0) {\n" +
+            "        return 'Python 缩进不合规：第 ' + (i+1) + ' 行缩进 ' + lead + ' 个空格，必须是 4 的倍数（用 4/8/12 个空格字符，不要 Tab、不要 1~3 空格）';\n" +
+            "      }\n" +
+            "      for (var c = 0; c < line.length; c++) {\n" +
+            "        var ch = line.charAt(c);\n" +
+            "        if (ch === '(' || ch === '[' || ch === '{') depth++;\n" +
+            "        else if (ch === ')' || ch === ']' || ch === '}') depth = depth > 0 ? depth - 1 : 0;\n" +
+            "      }\n" +
+            "    }\n" +
+            "    return null;\n" +
+            "  }\n" +
+            "\n" +
             "  function validateJsonRpc(parsed) {\n" +
             "    if (!parsed || typeof parsed !== 'object') return '回复不是合法的 JSON 对象';\n" +
             "    if (parsed.jsonrpc !== '2.0') return '缺少或错误的 jsonrpc 字段（必须为 2.0）';\n" +
@@ -414,6 +435,13 @@ public class DeepSeekChatBridge {
             "      if (!parsed.params || typeof parsed.params !== 'object') return '工具调用缺少 params 对象';\n" +
             "      if (typeof parsed.params.name !== 'string' || parsed.params.name.length === 0) return '工具调用缺少 params.name';\n" +
             "      if (!parsed.params.arguments || typeof parsed.params.arguments !== 'object') return '工具调用缺少 params.arguments 对象';\n" +
+            "      if (parsed.params.name === 'python') {\n" +
+            "        var scr = parsed.params.arguments.script;\n" +
+            "        if (typeof scr === 'string') {\n" +
+            "          var psErr = validatePythonScript(scr);\n" +
+            "          if (psErr) return psErr;\n" +
+            "        }\n" +
+            "      }\n" +
             "      return null;\n" +
             "    }\n" +
             "    if (parsed.result) {\n" +
