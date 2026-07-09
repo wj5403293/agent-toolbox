@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes" />
     <title>MCP 工具箱</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- 数学公式渲染：KaTeX（行内 $...$ 与块级 $$...$$） -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+    <style>
+      /* 代码块复制按钮浮层：用 wrapper 包裹 pre，按钮浮在右上角，避免 pre 横向滚动把按钮带走/裁切 */
+      .code-block-wrap { position: relative; }
+      .code-copy-btn {
+        position: absolute; top: 8px; right: 10px; z-index: 5;
+        padding: 2px 9px; font-size: 12px; line-height: 1.5;
+        color: #e2e8f0; background: rgba(30,41,59,.85);
+        border: 1px solid #334155; border-radius: 6px;
+        cursor: pointer; user-select: none; opacity: .82;
+        font-family: -apple-system, system-ui, sans-serif;
+      }
+      .code-copy-btn:hover { opacity: 1; }
+      .code-copy-btn.done { color: #4ade80; border-color: #22c55e; background: rgba(34,197,94,.18); }
+    </style>
     <script>
         // marked.js 配置：长文本用 parseInline 避免返回 Promise
         if (typeof marked !== 'undefined') {
@@ -97,6 +115,92 @@
                console.warn('[renderMarkdown] error:', e.message);
            }
            return '<pre style="white-space:pre-wrap; word-break:break-word; margin:0;">' + escapeHtml(text) + '</pre>';
+       }
+
+       // ============ 数学公式 + 代码块复制增强 ============
+       function copyToClipboard(text) {
+           if (navigator.clipboard && navigator.clipboard.writeText) {
+               return navigator.clipboard.writeText(text).catch(function() { return fallbackCopyText(text); });
+           }
+           return fallbackCopyText(text);
+       }
+
+       function fallbackCopyText(text) {
+           try {
+               const ta = document.createElement('textarea');
+               ta.value = text;
+               ta.style.position = 'fixed';
+               ta.style.top = '-9999px';
+               ta.style.opacity = '0';
+               document.body.appendChild(ta);
+               ta.focus();
+               ta.select();
+               const ok = document.execCommand('copy');
+               document.body.removeChild(ta);
+               return ok ? Promise.resolve() : Promise.reject(new Error('execCommand false'));
+           } catch (e) {
+               return Promise.reject(e);
+           }
+       }
+
+       function addCodeCopyButtons(container) {
+           const pres = container.querySelectorAll('.md-body pre');
+           pres.forEach(function(pre) {
+               if (pre.dataset.copyDone === '1') return;
+               pre.dataset.copyDone = '1';
+               // 用 wrapper 包裹 pre，按钮作为兄弟节点浮在右上角，避免 pre 横向滚动把按钮带走/裁切
+               const wrap = document.createElement('div');
+               wrap.className = 'code-block-wrap';
+               pre.parentNode.insertBefore(wrap, pre);
+               wrap.appendChild(pre);
+               const btn = document.createElement('button');
+               btn.type = 'button';
+               btn.className = 'code-copy-btn';
+               btn.textContent = '复制';
+               btn.addEventListener('click', function(e) {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   const codeEl = pre.querySelector('code');
+                   const code = codeEl ? codeEl.textContent : pre.textContent;
+                   copyToClipboard(code).then(function() {
+                       btn.textContent = '已复制';
+                       btn.classList.add('done');
+                       setTimeout(function() { btn.textContent = '复制'; btn.classList.remove('done'); }, 1500);
+                   }).catch(function() {
+                       btn.textContent = '复制失败';
+                       setTimeout(function() { btn.textContent = '复制'; }, 1500);
+                   });
+               });
+               wrap.appendChild(btn);
+           });
+       }
+
+       function renderMathInContainer(container) {
+           if (typeof renderMathInElement !== 'function') return; // KaTeX 未加载则跳过（后续 DOM 变化会重试）
+           const bodies = container.querySelectorAll('.md-body');
+           bodies.forEach(function(b) {
+               if (b.dataset.mathDone === '1') return;
+               b.dataset.mathDone = '1';
+               try {
+                   renderMathInElement(b, {
+                       delimiters: [
+                           { left: '$$', right: '$$', display: true },
+                           { left: '$', right: '$', display: false },
+                           { left: '\\(', right: '\\)', display: false },
+                           { left: '\\[', right: '\\]', display: true }
+                       ],
+                       ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+                       throwOnError: false
+                   });
+               } catch (e) {
+                   console.warn('[KaTeX] render error:', e && e.message);
+               }
+           });
+       }
+
+       function enhanceContent(root) {
+           renderMathInContainer(root);
+           addCodeCopyButtons(root);
        }
     </script>
     <style>
@@ -1296,6 +1400,17 @@
         const toolsList = $('toolsList');
         const toolCount = $('toolCount');
         const chatMessages = $('chatMessages');
+
+        // 数学公式 + 代码块复制：监听聊天区新增内容（.md-body 经 renderMarkdown 渲染）并增强
+        const mdObserver = new MutationObserver(function(mutations) {
+            let dirty = false;
+            mutations.forEach(function(m) { if (m.addedNodes.length) dirty = true; });
+            if (!dirty) return;
+            clearTimeout(window.__mdEnhanceTimer);
+            window.__mdEnhanceTimer = setTimeout(function() { enhanceContent(chatMessages); }, 200);
+        });
+        mdObserver.observe(chatMessages, { childList: true, subtree: true });
+        enhanceContent(chatMessages); // 对初始已有内容增强一次
         const chatInput = $('chatInput');
         const sendBtn = $('sendBtn');
         const logContent = $('logContent');
