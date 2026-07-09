@@ -266,7 +266,17 @@ public class SkillManager {
     /** 供 SkillReadTool 使用：返回 SKILL.md 正文，或 references 下某文件内容 */
     public synchronized String readSkill(String id, String reference) {
         Skill s = skillById.get(id);
-        if (s == null) return "技能不存在: " + id;
+        if (s == null) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("技能不存在: ").append(id).append("\n\n当前已加载的技能:\n");
+            for (Skill sk : skills) {
+                sb.append("  - ").append(sk.id).append(" (").append(sk.name).append(")");
+                if (sk.whenToUse != null && !sk.whenToUse.isEmpty()) sb.append(": ").append(sk.whenToUse);
+                sb.append("\n");
+            }
+            if (skills.isEmpty()) sb.append("  (无)");
+            return sb.toString();
+        }
         if (reference != null && !reference.trim().isEmpty()) {
             String c = s.references.get(reference.trim());
             return (c != null) ? c : "未找到参考文件: " + reference;
