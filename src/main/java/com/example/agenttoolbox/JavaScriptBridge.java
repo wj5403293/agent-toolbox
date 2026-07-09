@@ -579,4 +579,116 @@ public class JavaScriptBridge {
             "  };\n" +
             "})()";
     }
+
+    /**
+     * 注入代码块复制按钮：在每个助手回复的 <pre> 旁添加“复制”按钮
+     * 注意：按钮作为 <pre> 的兄弟节点挂到父容器上（并设父容器 position:relative），
+     *      绝不放入 <pre> 内部，否则会被 extractReply 的 textContent 抓取污染捕获内容
+     */
+    public void injectCodeCopy() {
+        String js = getCodeCopyScript();
+        webView.evaluateJavascript(js, null);
+    }
+
+    /**
+     * 构建代码块复制按钮脚本：
+     *  - 注入 .ds-copy-btn 浮层样式（右上角）
+     *  - navigator.clipboard 优先，失败降级到 textarea + execCommand('copy')
+     *  - 复制 <pre><code> 的 textContent（原始代码，保留换行）
+     *  - MutationObserver 监听新代码块，仅给未处理过的 pre 加按钮
+     */
+    private String getCodeCopyScript() {
+        return "(function() {\n" +
+            "  if (window.__dsCodeCopyInjected) return;\n" +
+            "  window.__dsCodeCopyInjected = true;\n" +
+            "  Android.log('[CodeCopy] 注入代码块复制按钮');\n" +
+            "\n" +
+            "  // 注入样式：按钮浮在代码块右上角，不进入 <pre> 内部\n" +
+            "  var style = document.createElement('style');\n" +
+            "  style.textContent = [\n" +
+            "    '.ds-copy-btn { position: absolute; top: 6px; right: 8px; z-index: 50;',\n" +
+            "    '  padding: 3px 9px; font-size: 12px; line-height: 1.4;',\n" +
+            "    '  color: #c9d1d9; background: rgba(33,38,45,.82);',\n" +
+            "    '  border: 1px solid rgba(255,255,255,.16); border-radius: 6px;',\n" +
+            "    '  cursor: pointer; user-select: none; opacity: .82;',\n" +
+            "    '  font-family: -apple-system, system-ui, sans-serif; }',\n" +
+            "    '.ds-copy-btn:hover { opacity: 1; }',\n" +
+            "    '.ds-copy-btn.done { color: #3fb950; border-color: rgba(63,185,80,.5); }'\n" +
+            "  ].join('\\n');\n" +
+            "  document.head.appendChild(style);\n" +
+            "\n" +
+            "  function fallbackCopy(text) {\n" +
+            "    try {\n" +
+            "      var ta = document.createElement('textarea');\n" +
+            "      ta.value = text;\n" +
+            "      ta.style.position = 'fixed';\n" +
+            "      ta.style.top = '-9999px';\n" +
+            "      ta.style.opacity = '0';\n" +
+            "      document.body.appendChild(ta);\n" +
+            "      ta.focus();\n" +
+            "      ta.select();\n" +
+            "      var ok = document.execCommand('copy');\n" +
+            "      document.body.removeChild(ta);\n" +
+            "      return ok ? Promise.resolve() : Promise.reject(new Error('execCommand false'));\n" +
+            "    } catch (e) {\n" +
+            "      return Promise.reject(e);\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  function copyText(text) {\n" +
+            "    if (navigator.clipboard && navigator.clipboard.writeText) {\n" +
+            "      return navigator.clipboard.writeText(text).catch(function() { return fallbackCopy(text); });\n" +
+            "    }\n" +
+            "    return fallbackCopy(text);\n" +
+            "  }\n" +
+            "\n" +
+            "  function addCopyBtn(pre) {\n" +
+            "    if (pre.dataset.dsCopy === '1') return;\n" +
+            "    pre.dataset.dsCopy = '1';\n" +
+            "    var parent = pre.parentNode;\n" +
+            "    if (parent && getComputedStyle(parent).position === 'static') {\n" +
+            "      parent.style.position = 'relative';\n" +
+            "    }\n" +
+            "    var btn = document.createElement('button');\n" +
+            "    btn.className = 'ds-copy-btn';\n" +
+            "    btn.type = 'button';\n" +
+            "    btn.textContent = '复制';\n" +
+            "    btn.addEventListener('click', function(e) {\n" +
+            "      e.preventDefault();\n" +
+            "      e.stopPropagation();\n" +
+            "      var codeEl = pre.querySelector('code');\n" +
+            "      var code = codeEl ? codeEl.textContent : pre.textContent;\n" +
+            "      copyText(code).then(function() {\n" +
+            "        btn.textContent = '已复制';\n" +
+            "        btn.classList.add('done');\n" +
+            "        setTimeout(function() { btn.textContent = '复制'; btn.classList.remove('done'); }, 1500);\n" +
+            "      }).catch(function() {\n" +
+            "        btn.textContent = '复制失败';\n" +
+            "        setTimeout(function() { btn.textContent = '复制'; }, 1500);\n" +
+            "      });\n" +
+            "    });\n" +
+            "    if (parent) parent.appendChild(btn);\n" +
+            "  }\n" +
+            "\n" +
+            "  window.__dsAddCopyBtns = function() {\n" +
+            "    var pres = document.querySelectorAll('.ds-assistant-message-main-content pre');\n" +
+            "    for (var i = 0; i < pres.length; i++) {\n" +
+            "      addCopyBtn(pres[i]);\n" +
+            "    }\n" +
+            "  };\n" +
+            "\n" +
+            "  window.__dsObserveCode = function() {\n" +
+            "    var container = document.querySelector('.ds-chat-main, .ds-conversation, #root') || document.body;\n" +
+            "    if (window.__dsCodeObserver) return;\n" +
+            "    window.__dsCodeObserver = new MutationObserver(function() {\n" +
+            "      clearTimeout(window.__dsCodeTimer);\n" +
+            "      window.__dsCodeTimer = setTimeout(window.__dsAddCopyBtns, 400);\n" +
+            "    });\n" +
+            "    window.__dsCodeObserver.observe(container, { childList: true, subtree: true });\n" +
+            "  };\n" +
+            "\n" +
+            "  window.__dsAddCopyBtns();\n" +
+            "  window.__dsObserveCode();\n" +
+            "})()";
+    }
 }
