@@ -8,6 +8,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import com.example.agenttoolbox.tools.ToolManager;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -273,17 +275,18 @@ public class SkillManager {
 
     private static ParsedMd parseSkillMd(BufferedReader br) throws IOException {
         ParsedMd p = new ParsedMd();
+        StringBuilder b = new StringBuilder();
         String line = br.readLine();
         if (line == null) return p;
         boolean inFm = line.trim().equals("---");
-        if (!inFm) p.body.append(line).append("\n");
+        if (!inFm) b.append(line).append("\n");
         List<String> fmLines = new ArrayList<>();
         while ((line = br.readLine()) != null) {
             if (inFm) {
                 if (line.trim().equals("---")) { inFm = false; continue; }
                 fmLines.add(line);
             } else {
-                p.body.append(line).append("\n");
+                b.append(line).append("\n");
             }
         }
         for (String fl : fmLines) {
@@ -296,7 +299,7 @@ public class SkillManager {
             }
             if (!k.isEmpty()) p.fm.put(k, v);
         }
-        p.body = trimRight(p.body.toString());
+        p.body = trimRight(b.toString());
         return p;
     }
 
@@ -331,6 +334,6 @@ public class SkillManager {
 
     private static class ParsedMd {
         Map<String, String> fm = new HashMap<>();
-        StringBuilder body = new StringBuilder();
+        String body = "";
     }
 }
