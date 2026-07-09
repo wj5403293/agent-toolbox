@@ -149,20 +149,42 @@ public class SkillManager {
             Log.d(TAG, "运行时技能目录不存在: " + base.getAbsolutePath());
             return;
         }
-        File[] dirs = base.listFiles();
-        if (dirs == null || dirs.length == 0) {
+        File[] entries = base.listFiles();
+        if (entries == null || entries.length == 0) {
             Log.d(TAG, "运行时技能目录为空: " + base.getAbsolutePath());
             return;
         }
-        for (File d : dirs) {
-            if (!d.isDirectory()) continue;
+        for (File d : entries) {
             try {
-                Skill skill = buildSkillFromRuntime(d);
+                Skill skill = null;
+                if (d.isDirectory()) {
+                    // 子目录模式：<skill-id>/SKILL.md
+                    skill = buildSkillFromRuntime(d);
+                } else if (d.isFile() && d.getName().endsWith(".md")) {
+                    // 单文件模式：<skill-id>.md（直接放 .md 文件即可）
+                    skill = buildSkillFromSingleFile(d);
+                }
                 if (skill != null) addSkill(skill);
             } catch (Exception e) {
                 Log.w(TAG, "跳过运行时技能 " + d.getName() + ": " + e.getMessage());
             }
         }
+    }
+
+    /** 从单文件构建 skill：文件名（不含 .md）为 id，解析 frontmatter */
+    private Skill buildSkillFromSingleFile(File f) throws IOException {
+        String id = f.getName();
+        if (id.endsWith(".md")) id = id.substring(0, id.length() - ".md".length());
+        ParsedMd parsed = parseSkillMd(f);
+        Skill skill = new Skill();
+        skill.id = id;
+        skill.name = parsed.fm.getOrDefault("name", id);
+        skill.description = parsed.fm.getOrDefault("description", "");
+        skill.whenToUse = parsed.fm.getOrDefault("when_to_use", "");
+        skill.body = parsed.body;
+        skill.fromAssets = false;
+        skill.dir = f.getParentFile();
+        return skill;
     }
 
     private Skill buildSkillFromRuntime(File d) throws IOException, JSONException {
