@@ -287,7 +287,7 @@ public class DeepSeekChatBridge {
             "  var initialLastAiLen = 0;\n" +
             "  if (initialAiCount > 0) {\n" +
             "    var lastAiInit = diagInitial[initialAiCount - 1];\n" +
-            "    initialLastAiLen = (lastAiInit.innerText || lastAiInit.textContent || '').trim().length;\n" +
+            "    initialLastAiLen = (lastAiInit.textContent || lastAiInit.innerText || '').trim().length;\n" +
             "  }\n" +
             "  Android.log('[JS] 初始AI回复数=' + initialAiCount + ', initialLastAiLen=' + initialLastAiLen + ', url=' + window.location.href);\n" +
             "  // 选择器探测：输出多种可能选择器的匹配数，定位正确的 AI 回复元素\n" +
@@ -339,10 +339,10 @@ public class DeepSeekChatBridge {
             "    var span = el.querySelector('.ds-assistant-message-main-content span');\n" +
             "    var rawText = '';\n" +
             "    if (span) {\n" +
-            "      rawText = (span.innerText || span.textContent || '').trim();\n" +
+            "      rawText = (span.textContent || span.innerText || '').trim();\n" +
             "    }\n" +
             "    if (!rawText) {\n" +
-            "      rawText = (el.innerText || el.textContent || '').trim();\n" +
+            "      rawText = (el.textContent || el.innerText || '').trim();\n" +
             "    }\n" +
             "    return rawText;\n" +
             "  }\n" +
@@ -475,14 +475,14 @@ public class DeepSeekChatBridge {
             "      // 输出每个 AI 元素的文本预览，定位新回复是否出现\n" +
             "      var previews = [];\n" +
             "      for (var dp = 0; dp < diagAiMsgs.length; dp++) {\n" +
-            "        var dt = (diagAiMsgs[dp].innerText || diagAiMsgs[dp].textContent || '').trim();\n" +
+            "        var dt = (diagAiMsgs[dp].textContent || diagAiMsgs[dp].innerText || '').trim();\n" +
             "        previews.push('[' + dp + ']len=' + dt.length + ':' + dt.substring(0, 30).replace(/\\n/g, ' '));\n" +
             "      }\n" +
             "      // 也输出当前最后一个元素长度，对比 initialLastAiLen\n" +
             "      var diagCurLen = 0;\n" +
             "      if (diagAiMsgs.length > 0) {\n" +
             "        var diagLast = diagAiMsgs[diagAiMsgs.length - 1];\n" +
-            "        diagCurLen = (diagLast.innerText || diagLast.textContent || '').trim().length;\n" +
+            "        diagCurLen = (diagLast.textContent || diagLast.innerText || '').trim().length;\n" +
             "      }\n" +
             "      Android.log('[JS] 诊断 poll#' + pollCount + ' ready=' + diagReady + ' aiCount=' + diagAiMsgs.length + '/' + initialAiCount + ' initLastLen=' + initialLastAiLen + ' curLastLen=' + diagCurLen + ' stable=' + stableCount + ' lastLen=' + lastTextLen + ' | ' + previews.join(' || '));\n" +
             "    }\n" +
@@ -499,7 +499,7 @@ public class DeepSeekChatBridge {
             "      hasNewContent = true;  // 新增了 AI 元素\n" +
             "    } else if (aiMsgs.length > 0) {\n" +
             "      var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
-            "      var currentLen = (lastAi.innerText || lastAi.textContent || '').trim().length;\n" +
+            "      var currentLen = (lastAi.textContent || lastAi.innerText || '').trim().length;\n" +
             "      if (currentLen !== initialLastAiLen) {\n" +
             "        hasNewContent = true;  // 最后一个元素内容变化（替换，可能变短）\n" +
             "      }\n" +
@@ -510,9 +510,9 @@ public class DeepSeekChatBridge {
             "    var lastAi = aiMsgs[aiMsgs.length - 1];\n" +
             "\n" +
             "    // 提取文本：优先用元素完整文本，span 可能只包含部分内容\n" +
-            "    var fullText = (lastAi.innerText || lastAi.textContent || '').trim();\n" +
+            "    var fullText = (lastAi.textContent || lastAi.innerText || '').trim();\n" +
             "    var span = lastAi.querySelector('span');\n" +
-            "    var spanText = span ? (span.innerText || span.textContent || '').trim() : '';\n" +
+            "    var spanText = span ? (span.textContent || span.innerText || '').trim() : '';\n" +
             "    // 取两者中更长的（span 可能截断，元素可能包含多余内容）\n" +
             "    var rawText = spanText.length > fullText.length ? spanText : fullText;\n" +
             "    if (!rawText || rawText.length < 2) return;\n" +
@@ -823,7 +823,7 @@ public class DeepSeekChatBridge {
                     "  for (var i = 0; i < selectors.length; i++) {\n" +
                     "    var els = document.querySelectorAll(selectors[i]);\n" +
                     "    if (els && els.length > 0) {\n" +
-                    "      var txt = (els[els.length - 1].innerText || els[els.length - 1].textContent || '').trim();\n" +
+                    "      var txt = (els[els.length - 1].textContent || els[els.length - 1].innerText || '').trim();\n" +
                     "      if (txt && txt.length > 5) return txt;\n" +
                     "    }\n" +
                     "  }\n" +
