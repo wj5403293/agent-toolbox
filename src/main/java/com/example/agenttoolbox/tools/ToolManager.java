@@ -33,6 +33,7 @@ public class ToolManager {
     public void init(Context ctx) {
         if (context != null) return;
         context = ctx.getApplicationContext();
+        ApkMcpClient.getInstance().setContext(ctx);
         
         // 注册所有内置工具
         registerTool(new MathCalculatorTool());

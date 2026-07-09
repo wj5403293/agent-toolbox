@@ -26,8 +26,13 @@ public class ApkMcpClient {
     private boolean enabled = true; // 默认启用，MT 未运行时会静默跳过
     private JSONArray remoteTools = new JSONArray();
     private int requestId = 0;
+    private android.content.Context appContext;
 
     private ApkMcpClient() {}
+
+    public void setContext(android.content.Context ctx) {
+        this.appContext = ctx.getApplicationContext();
+    }
 
     public static synchronized ApkMcpClient getInstance() {
         if (instance == null) instance = new ApkMcpClient();
@@ -190,9 +195,10 @@ public class ApkMcpClient {
 
     /**
      * 发送 MCP 请求（JSON-RPC 2.0）
+     * 经 PythonBridge 执行 Python urllib 发送 HTTP（已验证此通道能通），
+     * 绕过 Java HttpURLConnection 在部分 Android 环境下的兼容性问题。
      */
     private JSONObject sendMcpRequest(String method, JSONObject params) {
-        HttpURLConnection conn = null;
         try {
             int id = ++requestId;
             JSONObject rpc = new JSONObject();
@@ -201,54 +207,40 @@ public class ApkMcpClient {
             rpc.put("params", params);
             rpc.put("id", id);
 
-            String body = rpc.toString();
-            Log.d(TAG, "请求 [" + id + "]: " + method + " (长度=" + body.length() + ")");
+            String bodyStr = rpc.toString();
+            Log.d(TAG, "请求 [" + id + "]: " + method + " (长度=" + bodyStr.length() + ")");
 
-            URL url = new URL(mcpUrl);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(30000);
+            // 构造 Python 脚本来发 HTTP POST（复用已验证能通的 Python HTTP 通道）
+            // 对 bodyStr 做 Python 单引号字符串安全转义：\ → \\、' → \'
+            String pyBody = bodyStr.replace("\\", "\\\\").replace("'", "\\'");
+            String pyScript = "import urllib.request\n"
+                    + "url = '" + mcpUrl + "'\n"
+                    + "data = '" + pyBody + "'.encode('utf-8')\n"
+                    + "req = urllib.request.Request(url, data=data,\n"
+                    + "    headers={'Content-Type':'application/json'},\n"
+                    + "    method='POST')\n"
+                    + "try:\n"
+                    + "    resp = urllib.request.urlopen(req, timeout=10)\n"
+                    + "    print(resp.read().decode('utf-8'))\n"
+                    + "except Exception as e:\n"
+                    + "    print('PYHTTP_ERR:' + str(e))\n";
 
-            OutputStream os = conn.getOutputStream();
-            os.write(body.getBytes("UTF-8"));
-            os.flush();
-            os.close();
-
-            int code = conn.getResponseCode();
-            // 接受任何 2xx 状态码（MT 可能返回 201/202 而非 200）
-            String respStr;
-            if (code >= 200 && code < 300) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-                respStr = sb.toString();
-            } else {
-                // 非 2xx：读错误流并尝试解析 JSON（有些 JSON-RPC 服务器在 4xx/5xx 也带了错误体）
-                try {
-                    BufferedReader errReader = new BufferedReader(new InputStreamReader(conn.getErrorStream(), "UTF-8"));
-                    StringBuilder eb = new StringBuilder();
-                    String el;
-                    while ((el = errReader.readLine()) != null) eb.append(el);
-                    errReader.close();
-                    respStr = eb.toString().trim();
-                } catch (Exception ignored) { respStr = ""; }
-                Log.w(TAG, "HTTP " + code + " for " + method + " body=" + respStr);
-                if (respStr.isEmpty()) return null;
-                // 尝试把错误体当 JSON 解析（可能含 error 字段）
+            com.example.agenttoolbox.tools.PythonBridge.init(appContext);
+            String result = com.example.agenttoolbox.tools.PythonBridge.exec(pyScript);
+            if (result == null || result.trim().isEmpty()) {
+                Log.w(TAG, method + " Python HTTP 返回空");
+                return null;
             }
 
-            String respStr = sb.toString();
-            if (respStr.isEmpty()) return null;
+            result = result.trim();
+            if (result.startsWith("PYHTTP_ERR:")) {
+                String errDetail = result.substring(11);
+                Log.w(TAG, method + " Python HTTP 错误: " + errDetail);
+                return null;
+            }
 
-            JSONObject resp = new JSONObject(respStr);
+            JSONObject resp = new JSONObject(result);
 
-            // 检查错误
             if (resp.has("error")) {
                 JSONObject error = resp.optJSONObject("error");
                 String errMsg = error != null ? error.optString("message", "未知错误") : "未知错误";
@@ -261,8 +253,6 @@ public class ApkMcpClient {
         } catch (Exception e) {
             Log.e(TAG, "sendMcpRequest " + method + " 异常: " + e.getMessage());
             return null;
-        } finally {
-            if (conn != null) conn.disconnect();
         }
     }
 
