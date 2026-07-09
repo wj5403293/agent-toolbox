@@ -3,8 +3,12 @@ package com.example.agenttoolbox.mcp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import android.util.Log;
+
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 任务管理器 — 待办核心管理层
@@ -24,6 +28,10 @@ public class TaskManager {
             instance = new TaskManager();
         }
         return instance;
+    }
+
+    private void log(String msg) {
+        Log.d("TaskManager", msg);
     }
 
     /**
@@ -46,14 +54,31 @@ public class TaskManager {
             return new ArrayList<>();
         }
 
-        if (tasksArr != null) {
-            for (int i = 0; i < tasksArr.length(); i++) {
-                JSONObject taskJson = tasksArr.optJSONObject(i);
-                if (taskJson != null) {
-                    Task task = Task.fromJson(taskJson);
-                    planState.tasks.add(task);
-                }
+        // 归一化：保证每个任务都有“非空且唯一”的 task_id 与“非空”的 content，
+        // 否则下游 execute_task 会下发空字段（任务工具不严谨问题）。
+        Set<String> usedIds = new HashSet<>();
+        int autoSeq = 0;
+        for (int i = 0; i < tasksArr.length(); i++) {
+            JSONObject taskJson = tasksArr.optJSONObject(i);
+            if (taskJson == null) continue;
+            Task task = Task.fromJson(taskJson);
+
+            // 1) task_id 缺失/空白 → 自动分配 T001、T002…，并规避与已有 id 重复
+            if (task.taskId == null || task.taskId.trim().isEmpty()) {
+                String auto;
+                do { auto = String.format("T%03d", ++autoSeq); } while (usedIds.contains(auto));
+                task.taskId = auto;
+                log("[PLAN] 任务缺少 task_id，已自动分配: " + auto);
             }
+            usedIds.add(task.taskId);
+
+            // 2) content 缺失/空白 → 回退填充，保证 execute_task 不下发空内容
+            if (task.content == null || task.content.trim().isEmpty()) {
+                task.content = "任务 " + task.taskId;
+                log("[PLAN] 任务 " + task.taskId + " 缺少 content，已回退填充");
+            }
+
+            planState.tasks.add(task);
         }
 
         return new ArrayList<>(planState.tasks);

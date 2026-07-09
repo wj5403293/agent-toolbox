@@ -1829,8 +1829,11 @@ public class McpServer {
                 // 任务信息
                 if (task != null) {
                     JSONObject taskObj = new JSONObject();
-                    taskObj.put("task_id", task.taskId);
-                    taskObj.put("content", task.content);
+                    // 兜底：task_id/content 绝不下发空值（防御深度，loadPlan 已归一化）
+                    String tid = (task.taskId != null && !task.taskId.trim().isEmpty()) ? task.taskId : "T?";
+                    String tcontent = (task.content != null && !task.content.trim().isEmpty()) ? task.content : "(未提供任务内容)";
+                    taskObj.put("task_id", tid);
+                    taskObj.put("content", tcontent);
                     taskObj.put("priority", task.priority);
                     if (!task.deps.isEmpty()) {
                         JSONArray depsArr = new JSONArray();
@@ -1872,30 +1875,37 @@ public class McpServer {
 
         /**
          * 尝试从 LLM 回复文本中提取待办计划 JSON
-         * 支持格式：{"tasks":[...]} 或纯文本中嵌入的 JSON
+         * 严谨判定：仅当“整段内容本身就是一个计划 JSON 对象”时才认，
+         * 避免把讲解文字里举例用的 {"tasks":[...]} 误判为计划（任务工具不严谨问题）。
          */
         private JSONObject tryExtractPlan(String content) {
             if (content == null || content.isEmpty()) return null;
+            String trimmed = content.trim();
+            // 允许整段内容被 ```json ... ``` 代码围栏包裹（常见于 LLM 输出），先剥离
+            if (trimmed.startsWith("```")) {
+                int nl = trimmed.indexOf('\n');
+                trimmed = (nl >= 0 ? trimmed.substring(nl + 1) : trimmed.substring(3)).trim();
+            }
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
+            }
+            // 计划必须占据整段内容（首尾均为大括号，中间无多余正文）。
+            // org.json 构造器会忽略尾部多余字符，因此不能仅做子串解析，
+            // 否则正文里嵌入的示例 JSON 也会被成功解析并误当计划。
+            if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+            // 取最外层 { } 之间的内容作为候选，规避正文里嵌入的示例 JSON 片段
+            int first = trimmed.indexOf('{');
+            int last = trimmed.lastIndexOf('}');
+            if (last <= first) return null;
+            String candidate = trimmed.substring(first, last + 1);
             try {
-                // 直接解析
-                JSONObject json = new JSONObject(content);
+                JSONObject json = new JSONObject(candidate);
                 if (json.has("tasks") && json.optJSONArray("tasks") != null) {
                     return json;
                 }
             } catch (Exception e) {
-                // 不是纯 JSON，尝试从文本中提取
+                // 不是合法计划 JSON
             }
-            // 尝试从文本中提取 JSON（LLM 可能在 content 中嵌入 JSON 字符串）
-            try {
-                int braceIdx = content.indexOf('{');
-                if (braceIdx >= 0) {
-                    String sub = content.substring(braceIdx);
-                    JSONObject json = new JSONObject(sub);
-                    if (json.has("tasks") && json.optJSONArray("tasks") != null) {
-                        return json;
-                    }
-                }
-            } catch (Exception e) {}
             return null;
         }
 
