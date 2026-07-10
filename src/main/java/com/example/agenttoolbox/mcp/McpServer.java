@@ -1904,6 +1904,9 @@ public class McpServer {
         private JSONObject tryExtractPlan(String content) {
             if (content == null || content.isEmpty()) return null;
             String s = content.trim();
+            // 反转义 content 中 LLM 按 JSON 规则转义的引号（\\" → "），
+            // 否则内部嵌入的 {"tasks":...} JSON 无法被解析
+            s = s.replace("\\\"", "\"").replace("\\\\", "\\");
             // 允许整段内容被 ```json ... ``` 代码围栏包裹（常见于 LLM 输出），先剥离
             if (s.startsWith("```")) {
                 int nl = s.indexOf('\n');
