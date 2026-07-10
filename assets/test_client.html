@@ -2461,7 +2461,7 @@
                 bubbleEl.appendChild(summary);
                 bubbleEl.appendChild(detail);
             } else if (toolName === 'ask') {
-                // Ask 工具：纵向排列、编号、其他输入框
+                // Ask 工具：堆叠卡片，回答一个切下一个，全部答完统一发
                 bubbleEl.style.padding = '16px';
                 bubbleEl.style.borderRadius = '12px';
                 bubbleEl.style.background = '#fffbeb';
@@ -2470,116 +2470,105 @@
                 const isMulti = askText.indexOf('__ASK_MULTI__') === 0;
                 const raw = askText.replace(/^__ASK_MULTI__\n?/, '').trim();
                 const lines = raw.split('\n').filter(l => l.trim());
-                let html = '';
-                let questionIdx = 0;
-                let currentQ = '';
-                let currentOpts = [];
-                let optStartLine = 0;
-
-                function flushQ() {
-                    if (!currentQ) return;
-                    questionIdx++;
-                    html += '<div style="margin-bottom:14px; padding:10px 12px; background:#fff; border-radius:8px; border:1px solid #fef3c7;">';
-                    html += '<div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:8px;">' + questionIdx + '. ' + escapeHtml(currentQ) + '</div>';
-                    if (currentOpts.length > 0) {
-                        html += '<div style="display:flex; flex-direction:column; gap:6px;">';
-                        var optNum = 0;
-                        for (var oi = 0; oi < currentOpts.length; oi++) {
-                            optNum++;
-                            var optText = currentOpts[oi];
-                            html += '<button class="ask-opt-btn" data-val="' + escapeHtml(optText) + '" style="text-align:left; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + optNum + '. ' + escapeHtml(optText) + '</button>';
-                        }
-                        // 其他按钮
-                        html += '<div style="display:flex; gap:6px; align-items:center; margin-top:4px;">';
-                        html += '<button class="ask-other-btn" data-qidx="' + questionIdx + '" style="flex-shrink:0; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fffbeb; color:#92400e; font-size:13px; cursor:pointer;">0. 其他</button>';
-                        html += '<input class="ask-other-input" data-qidx="' + questionIdx + '" type="text" placeholder="输入你的回答…" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #fde68a; font-size:13px; outline:none; background:#fff;">';
-                        html += '</div>';
-                        html += '<div style="display:flex; gap:6px; margin-top:6px;">';
-                        html += '<button class="ask-submit-all" style="padding:8px 20px; border-radius:8px; border:none; background:#f59e0b; color:#fff; font-size:13px; font-weight:600; cursor:pointer;">提交全部回答</button>';
-                        html += '</div>';
-                        html += '</div>';
-                    } else {
-                        html += '<input class="ask-free-input" data-qidx="' + questionIdx + '" type="text" placeholder="输入你的回答…" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid #fde68a; font-size:13px; outline:none; background:#fff; box-sizing:border-box;">';
-                    }
-                    html += '</div>';
-                    currentOpts = [];
-                }
-
+                // 解析问题列表
+                const qList = [];
+                let curQ = '', curOpts = [];
                 for (var li = 0; li < lines.length; li++) {
                     var l = lines[li];
                     if (/^Q\d*:\s/.test(l)) {
-                        flushQ();
-                        currentQ = l.replace(/^Q\d*:\s*/, '');
+                        if (curQ) qList.push({ q: curQ, opts: curOpts });
+                        curQ = l.replace(/^Q\d*:\s*/, '');
+                        curOpts = [];
                     } else if (/^\s+\d+\.\d+\s/.test(l)) {
                         var m = l.match(/^\s+\d+\.\d+\s+(.+)/);
-                        if (m) currentOpts.push(m[1]);
+                        if (m) curOpts.push(m[1]);
                     } else if (/^\s+\d+\.\s/.test(l)) {
                         var m = l.match(/^\s+\d+\.\s+(.+)/);
-                        if (m) currentOpts.push(m[1]);
+                        if (m) curOpts.push(m[1]);
                     }
                 }
-                flushQ();
+                if (curQ) qList.push({ q: curQ, opts: curOpts });
 
-                if (!html) {
-                    html = '<div style="font-size:14px; color:#92400e;">' + escapeHtml(raw) + '</div>';
-                }
-                bubbleEl.innerHTML = html;
+                if (qList.length === 0) {
+                    bubbleEl.innerHTML = '<div style="font-size:14px; color:#92400e;">请回答：' + escapeHtml(raw) + '</div>';
+                } else {
+                    var stateKey = '__ask_state_' + Date.now();
+                    var cardId = 'ask_' + Math.random().toString(36).substr(2, 6);
+                    bubbleEl.id = cardId;
+                    // 状态：当前索引、答案列表
+                    window[stateKey] = { idx: 0, answers: [] };
+                    var card = bubbleEl;
+                    card.__askKey = stateKey;
+                    card.__qList = qList;
 
-                // 绑定事件：选项按钮
-                setTimeout(function() {
-                    bubbleEl.querySelectorAll('.ask-opt-btn').forEach(function(btn) {
-                        btn.onclick = function() {
-                            chatInput.value = this.getAttribute('data-val');
+                    function renderAskCard(cardEl) {
+                        var sk = cardEl.__askKey;
+                        var st = window[sk];
+                        var qs = cardEl.__qList;
+                        if (!st || st.idx >= qs.length) {
+                            // 全部答完，发送
+                            var all = [];
+                            for (var ai = 0; ai < st.answers.length; ai++) {
+                                all.push((ai + 1) + '. ' + st.answers[ai]);
+                            }
+                            chatInput.value = all.join('\n');
                             sendMessage();
-                        };
-                    });
-                    // 其他按钮：把输入框内容填入
-                    bubbleEl.querySelectorAll('.ask-other-btn').forEach(function(btn) {
-                        btn.onclick = function() {
-                            var idx = this.getAttribute('data-qidx');
-                            var input = bubbleEl.querySelector('.ask-other-input[data-qidx="' + idx + '"]');
-                            if (input && input.value.trim()) {
-                                chatInput.value = input.value.trim();
-                                sendMessage();
-                            } else if (input) {
-                                input.focus();
+                            cardEl.innerHTML = '<div style="font-size:14px; color:#92400e; padding:8px;">✅ 已提交全部回答</div>';
+                            return;
+                        }
+                        var cur = qs[st.idx];
+                        var idx = st.idx + 1;
+                        var total = qs.length;
+                        var html = '<div style="margin-bottom:10px; font-size:12px; color:#b45309; font-weight:500;">问题 ' + idx + '/' + total + '</div>';
+                        html += '<div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:10px;">' + escapeHtml(cur.q) + '</div>';
+                        if (cur.opts && cur.opts.length > 0) {
+                            html += '<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">';
+                            for (var oi = 0; oi < cur.opts.length; oi++) {
+                                var ov = escapeHtml(cur.opts[oi]);
+                                html += '<button class="ask-opt" data-val="' + ov + '" style="text-align:left; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + (oi+1) + '. ' + ov + '</button>';
                             }
-                        };
-                    });
-                    // 自由输入框回车发送
-                    bubbleEl.querySelectorAll('.ask-free-input').forEach(function(inp) {
-                        inp.onkeydown = function(e) {
-                            if (e.key === 'Enter' && this.value.trim()) {
-                                chatInput.value = this.value.trim();
-                                sendMessage();
-                            }
-                        };
-                    });
-                    // 其他输入框回车
-                    bubbleEl.querySelectorAll('.ask-other-input').forEach(function(inp) {
-                        inp.onkeydown = function(e) {
-                            if (e.key === 'Enter' && this.value.trim()) {
-                                var idx = this.getAttribute('data-qidx');
-                                chatInput.value = this.value.trim();
-                                sendMessage();
-                            }
-                        };
-                    });
-                    // 提交全部
-                    bubbleEl.querySelectorAll('.ask-submit-all').forEach(function(btn) {
-                        btn.onclick = function() {
-                            var answers = [];
-                            bubbleEl.querySelectorAll('.ask-other-input, .ask-free-input').forEach(function(inp) {
-                                var val = inp.value.trim();
-                                if (val) answers.push(val);
-                            });
-                            if (answers.length > 0) {
-                                chatInput.value = answers.join(' | ');
-                                sendMessage();
-                            }
-                        };
-                    });
-                }, 0);
+                            html += '</div>';
+                            html += '<div style="display:flex; gap:6px; align-items:center;">';
+                            html += '<button class="ask-other" style="flex-shrink:0; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fffbeb; color:#92400e; font-size:13px; cursor:pointer;">其他</button>';
+                            html += '<input class="ask-input" type="text" placeholder="输入回答…" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #fde68a; font-size:13px; outline:none; background:#fff;">';
+                            html += '</div>';
+                        } else {
+                            html += '<input class="ask-input" type="text" placeholder="输入回答…" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid #fde68a; font-size:13px; outline:none; background:#fff; box-sizing:border-box;">';
+                        }
+                        cardEl.innerHTML = html;
+                        // 绑定事件
+                        cardEl.querySelectorAll('.ask-opt').forEach(function(b) {
+                            b.onclick = function() {
+                                var ans = this.getAttribute('data-val');
+                                window[sk].answers.push(ans);
+                                window[sk].idx++;
+                                renderAskCard(cardEl);
+                            };
+                        });
+                        cardEl.querySelectorAll('.ask-other').forEach(function(b) {
+                            b.onclick = function() {
+                                var inp = cardEl.querySelector('.ask-input');
+                                if (inp && inp.value.trim()) {
+                                    window[sk].answers.push(inp.value.trim());
+                                    window[sk].idx++;
+                                    renderAskCard(cardEl);
+                                } else if (inp) { inp.focus(); }
+                            };
+                        });
+                        cardEl.querySelectorAll('.ask-input').forEach(function(inp) {
+                            inp.onkeydown = function(e) {
+                                if (e.key === 'Enter' && this.value.trim()) {
+                                    window[sk].answers.push(this.value.trim());
+                                    window[sk].idx++;
+                                    renderAskCard(cardEl);
+                                }
+                            };
+                            setTimeout(function() { inp.focus(); }, 50);
+                        });
+                    }
+
+                    renderAskCard(card);
+                }
             } else {
                 // 普通工具结果
                 bubbleEl.style.whiteSpace = 'pre-wrap';
