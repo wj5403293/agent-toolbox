@@ -2355,7 +2355,7 @@
                 'gm_memory_freeze': '❄', 'gm_lua_execute': '📜', 'aob_search': '🔎',
                 'file_list': '📁', 'file_read': '📄', 'file_write': '📝',
                 'shell': '💻', 'cmd': '⚡', 'python': '🐍', 'http_request': '🌐',
-                'web': '🌍', 'math_calculator': '🔢'
+                'web': '🌍', 'math_calculator': '🔢', 'ask': '❓'
             };
             const icon = iconMap[toolName] || '🔧';
             return icon + ' 正在调用工具：' + toolLabel + '（请稍候…）';
@@ -2393,7 +2393,7 @@
                 'gm_memory_search': '🔍', 'gm_memory_read': '👁', 'gm_memory_write': '✏',
                 'gm_memory_freeze': '❄', 'gm_lua_execute': '📜', 'aob_search': '🔎',
                 'shell': '💻', 'cmd': '⚡', 'python': '🐍', 'http_request': '🌐',
-                'web': '🌍', 'math_calculator': '🔢'
+                'web': '🌍', 'math_calculator': '🔢', 'ask': '❓'
             };
             const icon = iconMap[toolName] || '🔧';
             labelEl.innerHTML = '<span class="method-badge method-response">' + icon + ' ' + toolName + '</span> <span class="text-muted" style="font-size:12px;">工具结果</span>';
@@ -2460,6 +2460,45 @@
 
                 bubbleEl.appendChild(summary);
                 bubbleEl.appendChild(detail);
+            } else if (toolName === 'ask') {
+                // Ask 工具：展示问题 + 可点击选项按钮
+                bubbleEl.style.padding = '14px 16px';
+                bubbleEl.style.borderRadius = '12px';
+                bubbleEl.style.background = '#fffbeb';
+                bubbleEl.style.border = '1px solid #fde68a';
+                // 提取问题文本和选项
+                const askText = result || '';
+                const optMatch = askText.match(/可选回答：\n([\s\S]*?)(?:\n\n请|$)/);
+                const options = [];
+                if (optMatch) {
+                    const optLines = optMatch[1].trim().split('\n');
+                    for (const ol of optLines) {
+                        const m = ol.match(/^\s*\d+\.\s*(.+)$/);
+                        if (m) options.push(m[1]);
+                    }
+                }
+                const qText = askText.replace(/❓\s*/, '').replace(/\n可选回答：[\s\S]*$/, '').trim();
+                let html = '<div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:8px;">❓ ' + escapeHtml(qText) + '</div>';
+                if (options.length > 0) {
+                    html += '<div style="display:flex; flex-wrap:wrap; gap:6px;">';
+                    for (const opt of options) {
+                        const esc = escapeHtml(opt);
+                        html += '<button class="ask-opt-btn" data-opt="' + esc + '" style="padding:6px 14px; border-radius:8px; border:1px solid #f59e0b; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + esc + '</button>';
+                    }
+                    html += '</div>';
+                } else {
+                    html += '<div style="font-size:12px; color:#92400e;">请在输入框中回答</div>';
+                }
+                bubbleEl.innerHTML = html;
+                // 绑定选项点击事件：填入输入框并发送
+                setTimeout(function() {
+                    bubbleEl.querySelectorAll('.ask-opt-btn').forEach(function(btn) {
+                        btn.onclick = function() {
+                            chatInput.value = this.getAttribute('data-opt');
+                            sendMessage();
+                        };
+                    });
+                }, 0);
             } else {
                 // 普通工具结果
                 bubbleEl.style.whiteSpace = 'pre-wrap';
