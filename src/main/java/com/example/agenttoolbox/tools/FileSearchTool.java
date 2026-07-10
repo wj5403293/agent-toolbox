@@ -135,8 +135,10 @@ public class FileSearchTool implements Tool {
                     }
                 } else if (searchContent && !nameMatch) {
                     // 搜索文件内容：逐行读取，标注行号
-                    java.util.List<String> matchLines = new java.util.ArrayList<>();
-                    try (BufferedReader br = new BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"))) {
+                    java.util.List<String> matchLines = new java.util.ArrayList<String>();
+                    BufferedReader br = null;
+                    try {
+                        br = new BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"));
                         String line;
                         int lineNum = 0;
                         while ((line = br.readLine()) != null) {
@@ -150,7 +152,10 @@ public class FileSearchTool implements Tool {
                                 matchLines.add("  L" + lineNum + ": " + line.trim());
                             }
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (br != null) { try { br.close(); } catch (Exception ignore2) {} }
+                    }
                     if (!matchLines.isEmpty()) {
                         StringBuilder mb = new StringBuilder();
                         mb.append("[内容匹配] ").append(f.getAbsolutePath()).append(" (").append(formatSize(f.length())).append(")");
