@@ -375,7 +375,7 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.17（commit 数 /100，共 217 次提交）
+- **版本**: 2.1.7（commit 数 /100→大版本，余数/10→小版本，个位→补丁，共 217 次提交）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
 - **最低 Android**: API 24 (Android 7.0)
