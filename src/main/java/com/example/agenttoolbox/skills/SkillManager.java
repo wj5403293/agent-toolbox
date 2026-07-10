@@ -294,8 +294,10 @@ public class SkillManager {
     public synchronized String getRuntimeSkillsPath() {
         if (context == null) return "（Context 不可用）";
         File extDir = context.getExternalFilesDir(null);
-        if (extDir == null) return "（无法获取外部存储路径）";
-        return new File(extDir, "skills").getAbsolutePath();
+        if (extDir != null) return new File(extDir, "skills").getAbsolutePath();
+        File intDir = context.getFilesDir();
+        if (intDir != null) return new File(intDir, "skills").getAbsolutePath();
+        return "（无法获取存储路径）";
     }
 
     /** 供 SkillReadTool 使用：返回 SKILL.md 正文，或 references 下某文件内容 */
