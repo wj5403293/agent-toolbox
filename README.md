@@ -46,6 +46,8 @@
 | **文件** | `file_read` | 文件读取（支持行范围） |
 | | `file_write` | 文件写入（replace/insert/append） |
 | | `file_list` | 目录列表 |
+| | `file_search` | 文件搜索（多关键词，可搜文件名/内容） |
+| **交互** | `ask` | 向用户提问（单问题/多问题，选项按钮/输入框） |
 | **网络** | `http_request` | HTTP 请求（GET/POST/PUT/DELETE） |
 | | `web` | 网页内容获取 |
 | **数学** | `math_calculator` | 高精度数学计算 |

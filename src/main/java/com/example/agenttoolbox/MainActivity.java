@@ -249,6 +249,14 @@ public class MainActivity extends Activity {
         try {
             appendLog("正在启动MCP服务...");
 
+            // 先启动前台服务（WakeLock + 通知栏保活）
+            Intent serviceIntent = new Intent(this, McpForegroundService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+
             mcpServer = new McpServer(PORT, MainActivity.this);
             // 初始化统一日志门面（同时输出到 UI 和 logcat）
             final Handler h = handler;

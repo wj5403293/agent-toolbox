@@ -75,17 +75,9 @@ public class McpForegroundService extends Service {
                 Log.i(TAG, "WakeLock acquired");
             }
 
-            // 启动MCP服务器
-            if (mcpServer == null) {
-                Log.i(TAG, "Creating McpServer");
-                mcpServer = new McpServer(8080, this);
-                Log.i(TAG, "McpServer created, calling start()");
-                mcpServer.start();
-                Log.i(TAG, "McpServer started successfully");
-                Toast.makeText(this, "MCP服务启动成功", Toast.LENGTH_SHORT).show();
-            }
+            Toast.makeText(this, "MCP服务前台保活已启动", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
-            String error = "McpForegroundService异常: " + e.getClass().getName() + "\n" + e.getMessage() + "\n\n堆栈:\n" + android.util.Log.getStackTraceString(e);
+            String error = "McpForegroundService异常: " + e.getClass().getName() + "\n" + e.getMessage();
             Log.e(TAG, error);
             Toast.makeText(this, error, Toast.LENGTH_LONG).show();
         }
