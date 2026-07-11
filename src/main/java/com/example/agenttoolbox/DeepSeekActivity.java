@@ -123,6 +123,11 @@ public class DeepSeekActivity extends Activity {
         // MCP 工具箱浮动层初始化
         mcpOverlay = (android.widget.FrameLayout) findViewById(R.id.mcpOverlay);
         mcpWebView = (android.webkit.WebView) findViewById(R.id.mcpWebView);
+        // 配置 MCP 工具箱 WebView（开 JS、DOM 存储）
+        android.webkit.WebSettings ms = mcpWebView.getSettings();
+        ms.setJavaScriptEnabled(true);
+        ms.setDomStorageEnabled(true);
+        ms.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         btnCloseMcp = (android.widget.TextView) findViewById(R.id.btnCloseMcp);
         btnCloseMcp.setOnClickListener(new View.OnClickListener() {
             @Override
