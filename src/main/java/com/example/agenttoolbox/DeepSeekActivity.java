@@ -128,9 +128,7 @@ public class DeepSeekActivity extends Activity {
         ms.setJavaScriptEnabled(true);
         ms.setDomStorageEnabled(true);
         ms.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        btnCloseMcp = (android.widget.TextView) findViewById(R.id.btnCloseMcp);
-        // 关闭按钮改为程序化创建（可拖动 + 同 MCP 按钮样式）
-        // 不需要 XML 定义的 btnCloseMcp，创建新的浮动关闭按钮
+        // 创建程序化的关闭按钮（可拖动，同 MCP 样式）
         createCloseButton();
 
         // 创建毛玻璃浮动按钮
