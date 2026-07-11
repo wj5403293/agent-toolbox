@@ -206,26 +206,20 @@ public class DeepSeekActivity extends Activity {
     private void createFloatButton() {
         mcpFloatBtn = new TextView(this);
         mcpFloatBtn.setText("🔧");
-        mcpFloatBtn.setTextSize(20f);
+        mcpFloatBtn.setTextSize(22f);
         mcpFloatBtn.setGravity(android.view.Gravity.CENTER);
-        // 毛玻璃效果：半透明 + 圆角 + 边框
-        mcpFloatBtn.setBackgroundResource(android.R.drawable.ic_menu_compass);
-        mcpFloatBtn.setBackgroundColor(0xCC1E293B);
-        mcpFloatBtn.getBackground().mutate();
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-        gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        gd.setSize(56, 56);
-        gd.setColor(0xCC1E293B);
-        gd.setStroke(2, 0x4FFFFFFF);
+        // 毛玻璃效果：半透明深色背景 + 圆角
+        mcpFloatBtn.setPadding(0, 0, 0, 0);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-            gd.setCornerRadius(28f);
-            mcpFloatBtn.setElevation(6f);
+            mcpFloatBtn.setElevation(8f);
+            mcpFloatBtn.setBackground(mcpFloatBtn.getResources().getDrawable(android.R.drawable.ic_menu_compass));
         }
-        mcpFloatBtn.setBackground(gd);
-        // LayoutParams：固定在底部中央偏右
-        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(56, 56);
+        mcpFloatBtn.setBackgroundColor(0xBB1E293B);
+        // LayoutParams：固定在底部中央
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(52, 52);
         lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL;
-        lp.bottomMargin = 60;
+        lp.bottomMargin = 16;
+        lp.leftMargin = 16;
         webViewContainer.addView(mcpFloatBtn, lp);
 
         // 拖动逻辑

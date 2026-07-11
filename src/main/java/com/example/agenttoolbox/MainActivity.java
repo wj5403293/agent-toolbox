@@ -104,6 +104,7 @@ public class MainActivity extends Activity {
 
         // 技能安装目录
         final TextView tvSkillsPath = (TextView) findViewById(R.id.tvSkillsPath);
+        com.example.agenttoolbox.skills.SkillManager.getInstance().init(this);
         final String skillsPath = com.example.agenttoolbox.skills.SkillManager.getInstance().getRuntimeSkillsPath();
         if (skillsPath != null) {
             tvSkillsPath.setText("技能目录: " + skillsPath);
@@ -255,6 +256,12 @@ public class MainActivity extends Activity {
                 startForegroundService(serviceIntent);
             } else {
                 startService(serviceIntent);
+            }
+
+            // 如果已有服务器在运行，先停掉（防止 EADDRINUSE）
+            if (mcpServer != null && mcpServer.isRunning()) {
+                mcpServer.stop();
+                mcpServer = null;
             }
 
             mcpServer = new McpServer(PORT, MainActivity.this);
