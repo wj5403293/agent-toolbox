@@ -141,7 +141,6 @@ public class MainActivity extends Activity {
 
         // 技能安装目录
         final TextView tvSkillsPath = (TextView) findViewById(R.id.tvSkillsPath);
-        com.example.agenttoolbox.skills.SkillManager.getInstance().init(this);
         final String skillsPath = com.example.agenttoolbox.skills.SkillManager.getInstance().getRuntimeSkillsPath();
         if (skillsPath != null) {
             tvSkillsPath.setText("技能目录: " + skillsPath);
