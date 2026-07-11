@@ -251,7 +251,7 @@ public class DeepSeekChatBridge {
                             cleanupRequest(requestId);
                         }
                     }
-                });
+                }).start();
             }
         });
     }
