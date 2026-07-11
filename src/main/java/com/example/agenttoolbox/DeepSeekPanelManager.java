@@ -88,23 +88,6 @@ public class DeepSeekPanelManager {
         container.setVisibility(View.GONE);
     }
 
-    /** 从视图树摘除 WebView（切后台时调用，防止 Android 暂停 JS） */
-    public void detach() {
-        if (webView != null) {
-            ViewGroup parent = (ViewGroup) webView.getParent();
-            if (parent != null) parent.removeView(webView);
-        }
-    }
-
-    /** 将 WebView 接回容器（从后台恢复时调用） */
-    public void attach() {
-        if (webView != null && webView.getParent() == null) {
-            container.addView(webView, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        }
-    }
-
     /** 销毁 WebView */
     public void destroy() {
         if (msgChecker != null) msgHandler.removeCallbacks(msgChecker);

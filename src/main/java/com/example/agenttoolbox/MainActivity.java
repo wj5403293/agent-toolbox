@@ -432,22 +432,6 @@ public class MainActivity extends Activity {
     }
     
     @Override
-    protected void onPause() {
-        super.onPause();
-        // 切后台时摘掉 WebView，防止 Android 暂停其 JS 执行
-        if (deepSeekPanel != null) deepSeekPanel.detach();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // 回前台时接回 WebView
-        if (deepSeekPanel != null && deepseekContainer.getVisibility() == View.VISIBLE) {
-            deepSeekPanel.attach();
-        }
-    }
-
-    @Override
     protected void onDestroy() {
         super.onDestroy();
         stopServer();
