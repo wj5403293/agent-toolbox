@@ -740,11 +740,13 @@ public class McpServer {
                             "\r\n";
                         out.write(header.getBytes("UTF-8"));
                         out.flush();
-                        
+                        log("[SSE] [" + conversationId + "] SSE头部已发送 (Content-Type=text/event-stream, Transfer-Encoding=chunked)");
+
                         // Mark that we have entered the streaming path - for cleanup during exception handling
                         isStreamingPath = true;
 
                         writeEventChunk(out, "started", new JSONObject().put("ok", true).toString());
+                        log("[SSE] [" + conversationId + "] 已发送 started 事件");
 
                         // 心跳
                         final AtomicReference<Long> lastActivityAt = new AtomicReference<>(System.currentTimeMillis());
@@ -1030,9 +1032,10 @@ public class McpServer {
                                             j.put("isToolCall", isToolCall);
                                             j.put("canContinue", canContinue);
                                             writeEventChunk(out, "done", j.toString());
-                                            log("[ROUND] 完成: 长度=" + finalReply.length()
+                                            log("[ROUND] [" + conversationId + "] 完成: 长度=" + finalReply.length()
                                                 + " 类型=" + (isToolCall ? "【工具调用】" : "【文本回复】")
-                                                + " canContinue=" + canContinue);
+                                                + " canContinue=" + canContinue + " finalReply前100字="
+                                                + (finalReply.length() > 100 ? finalReply.substring(0, 100) : finalReply));
                                         } catch (Exception e) {
                                             log("[LLM] onDone异常: "
                                                 + "类型=" + e.getClass().getName()
@@ -1462,12 +1465,13 @@ public class McpServer {
                         }
 
                         // 刷新所有待处理的写入任务，确保所有块都已发送
+                        log("[SSE] [" + conversationId + "] 对话结束，round=" + round + " 准备发送终止符");
                         flushWriteHandler();
                         // 然后发送 chunked 编码终止符
                         endChunked(out);
                         stopHeartbeat.set(true);
                         streamingCompleted = true;  // Mark that streaming completed normally
-                        log("=========== Conversation ended, total " + round + " rounds ===========");
+                        log("[SSE] [" + conversationId + "] =========== Conversation ended, total " + round + " rounds ===========");
                         return; // Streaming path ended, return
                     } // end of send success block
                 } else if ("/api/chat/status".equals(action)) {
@@ -1611,15 +1615,19 @@ public class McpServer {
                 synchronized (out) {
                     String event = "event: " + type + "\n" + "data: " + jsonData + "\n\n";
                     byte[] data = event.getBytes("UTF-8");
-                    out.write(Integer.toHexString(data.length).getBytes("UTF-8"));
+                    String hexLen = Integer.toHexString(data.length);
+                    out.write(hexLen.getBytes("UTF-8"));
                     out.write("\r\n".getBytes("UTF-8"));
                     out.write(data);
                     out.write("\r\n".getBytes("UTF-8"));
                     out.flush();
+                    log("[SSE-WRITE] 已写入: type=" + type + " 数据长度=" + jsonData.length() + "  chunkHex=" + hexLen);
                 }
             } catch (IOException e) {
                 if (!isSocketClosed(e)) {
-                    log("SSE写入异常: " + e.getMessage());
+                    log("[SSE-WRITE] SSE写入异常: type=" + type + " 错误=" + e.getMessage());
+                } else {
+                    log("[SSE-WRITE] SSE写入跳过: type=" + type + " 原因=Socket已关闭");
                 }
             }
         }
@@ -1638,7 +1646,8 @@ public class McpServer {
                     }
                 });
                 // 等待同步任务完成，但设置超时以防止死锁（最多等待5秒）
-                latch.await(5, TimeUnit.SECONDS);
+                boolean done = latch.await(5, TimeUnit.SECONDS);
+                log("[SSE-FLUSH] flushWriteHandler: " + (done ? "完成" : "超时(5s)"));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log("flushWriteHandler 被中断: " + e.getMessage());
@@ -1653,12 +1662,14 @@ public class McpServer {
                     // 这是 HTTP chunked transfer encoding 的必需部分
                     out.write("0\r\n\r\n".getBytes("UTF-8"));
                     out.flush();
-                    log("已发送 chunked 编码终止符");
+                    log("[SSE-END] 已发送 chunked 编码终止符 (0\\r\\n\\r\\n)");
                 }
             } catch (IOException e) {
                 // Socket closed is expected when client disconnects, only log other IOExceptions
                 if (!isSocketClosed(e)) {
-                    log("SSE结束写入异常: " + e.getMessage());
+                    log("[SSE-END] 终止符写入异常: " + e.getMessage());
+                } else {
+                    log("[SSE-END] 终止符写入跳过: Socket已关闭");
                 }
             }
         }
