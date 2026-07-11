@@ -300,6 +300,8 @@ public class DeepSeekActivity extends Activity {
                 "try {" +
                 "  Object.defineProperty(document, 'visibilityState', {get:function(){return 'visible';}, configurable:true});" +
                 "  Object.defineProperty(document, 'hidden', {get:function(){return false;}, configurable:true});" +
+                "  window.requestAnimationFrame = function(cb) { return setTimeout(function() { cb(Date.now()); }, 16); };" +
+                "  window.cancelAnimationFrame = function(id) { clearTimeout(id); };" +
                 "} catch(e){}", null);
         }
         // 只首次加载 URL，后续打开不再刷新（保持页面状态）
@@ -432,6 +434,9 @@ public class DeepSeekActivity extends Activity {
                 DeepSeekChatBridge.getInstance().markAsLoaded();
 
                 // 注入可见性覆盖：防止 MCP 悬浮窗覆盖时 DeepSeek 页面冻结
+                // 1. 覆盖 visibilityState/hidden → React 认为页面始终可见
+                // 2. 拦截 visibilitychange 事件 → React 收不到隐藏通知
+                // 3. 用 setTimeout 替代 requestAnimationFrame → 绕过 WebView 渲染暂停
                 view.evaluateJavascript(
                     "try {" +
                     "  Object.defineProperty(document, 'visibilityState', {get:function(){return 'visible';}, configurable:true});" +
@@ -440,6 +445,10 @@ public class DeepSeekActivity extends Activity {
                     "  Object.defineProperty(document, 'webkitHidden', {get:function(){return false;}, configurable:true});" +
                     "  document.addEventListener('visibilitychange', function(e){e.stopImmediatePropagation();}, true);" +
                     "  document.addEventListener('webkitvisibilitychange', function(e){e.stopImmediatePropagation();}, true);" +
+                    "  window.requestAnimationFrame = function(cb) { return setTimeout(function() { cb(Date.now()); }, 16); };" +
+                    "  window.cancelAnimationFrame = function(id) { clearTimeout(id); };" +
+                    "  window.webkitRequestAnimationFrame = window.requestAnimationFrame;" +
+                    "  window.webkitCancelAnimationFrame = window.cancelAnimationFrame;" +
                     "} catch(e){}", null);
 
                 // 延迟检测登录状态
