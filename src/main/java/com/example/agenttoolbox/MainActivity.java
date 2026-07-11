@@ -42,7 +42,9 @@ public class MainActivity extends Activity {
     private Button btnDeepSeek;
     private TextView statusChip;
     private View deepseekContainer;
-    private DeepSeekPanelManager deepSeekPanel;
+    private FrameLayout deepseekWebViewContainer;
+    private TextView tvDeepSeekStatus;
+    private android.webkit.WebView deepseekWebView;
 
     
     private McpServer mcpServer;
@@ -68,15 +70,8 @@ public class MainActivity extends Activity {
         btnDeepSeek = (Button) findViewById(R.id.btnDeepSeek);
         statusChip = (TextView) findViewById(R.id.statusChip);
         deepseekContainer = findViewById(R.id.deepseekContainer);
-
-        // DeepSeek 面板管理器
-        deepSeekPanel = new DeepSeekPanelManager(this,
-                (FrameLayout) findViewById(R.id.deepseekWebView),
-                (TextView) findViewById(R.id.tvLoginStatus),
-                (TextView) findViewById(R.id.tvDeepSeekStatus),
-                (TextView) findViewById(R.id.tvMcpStatus),
-                findViewById(R.id.btnNewChat),
-                findViewById(R.id.btnRefreshDS));
+        deepseekWebViewContainer = (FrameLayout) findViewById(R.id.deepseekWebView);
+        tvDeepSeekStatus = (TextView) findViewById(R.id.tvDeepSeekStatus);
 
         // 初始化文件目录
         initFileDir();
@@ -109,14 +104,6 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 closeDeepSeek();
             }
-        });
-
-        // DeepSeek 的新会话和刷新按钮
-        findViewById(R.id.btnNewChat).setOnClickListener(v -> {
-            if (deepSeekPanel != null) deepSeekPanel.newChat();
-        });
-        findViewById(R.id.btnRefreshDS).setOnClickListener(v -> {
-            if (deepSeekPanel != null) { openDeepSeek(); }
         });
 
         // 点击监听地址复制到剪贴板
@@ -370,16 +357,31 @@ public class MainActivity extends Activity {
         if (mcpServer == null || !mcpServer.isRunning()) {
             appendLog("提示：请先启动 MCP 服务，以便 DeepSeek 使用工具能力");
         }
-        if (deepSeekPanel != null) {
-            deepSeekPanel.open();
-            deepSeekPanel.startMessageMonitor();
-            deepseekContainer.setVisibility(View.VISIBLE);
+
+        // 首次打开时创建 WebView
+        if (deepseekWebView == null) {
+            deepseekWebView = new android.webkit.WebView(this);
+            deepseekWebView.getSettings().setJavaScriptEnabled(true);
+            deepseekWebView.getSettings().setDomStorageEnabled(true);
+            deepseekWebView.getSettings().setUserAgentString("Mozilla/5.0 (Linux; Android)");
+            deepseekWebView.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+            deepseekWebView.loadUrl("https://chat.deepseek.com");
         }
+
+        // 把 WebView 放进容器，显示 DeepSeek 面板
+        if (deepseekWebView.getParent() == null) {
+            deepseekWebViewContainer.addView(deepseekWebView);
+        }
+        deepseekContainer.setVisibility(View.VISIBLE);
+        tvDeepSeekStatus.setText("DeepSeek");
     }
 
     private void closeDeepSeek() {
         deepseekContainer.setVisibility(View.GONE);
-        if (deepSeekPanel != null) deepSeekPanel.close();
+        tvDeepSeekStatus.setText("已隐藏");
     }
     
     /**
