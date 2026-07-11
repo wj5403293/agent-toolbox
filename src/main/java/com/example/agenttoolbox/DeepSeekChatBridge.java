@@ -34,6 +34,22 @@ public class DeepSeekChatBridge {
 
     private static DeepSeekChatBridge instance;
 
+    // 固定大小线程池，避免每轮对话创建新线程导致 OOM
+    private final java.util.concurrent.ExecutorService executorService =
+        java.util.concurrent.Executors.newFixedThreadPool(3, new java.util.concurrent.ThreadFactory() {
+            private final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "DSBridge-Worker-" + count.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+
+    public void shutdown() {
+        executorService.shutdownNow();
+    }
+
     public static DeepSeekChatBridge getInstance() {
         if (instance == null) {
             synchronized (DeepSeekChatBridge.class) {
@@ -201,10 +217,10 @@ public class DeepSeekChatBridge {
         handler.post(new Runnable() {
             @Override
             public void run() {
-                AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] injectChatScript完成, 准备启动后台等待线程");
+                AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] injectChatScript完成, 提交到线程池");
 
-                // 后台线程等待完成，以便调 onDone / onError
-                new Thread(new Runnable() {
+                // 用线程池代替 new Thread，避免多轮对话线程泄漏导致 OOM
+                executorService.submit(new Runnable() {
                     @Override
                     public void run() {
                         AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] 后台线程已启动, 进入latch.await");
@@ -254,7 +270,7 @@ public class DeepSeekChatBridge {
                             cleanupRequest(requestId);
                         }
                     }
-                }).start();
+                });
             }
         });
     }

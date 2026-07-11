@@ -135,6 +135,8 @@ public class McpServer {
         if (threadPool != null) {
             threadPool.shutdownNow();
         }
+        // 清理会话缓存，防止内存泄漏
+        SessionCache.getInstance().clear();
         log("MCP服务已停止");
     }
 

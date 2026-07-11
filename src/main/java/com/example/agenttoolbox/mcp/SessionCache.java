@@ -20,13 +20,20 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class SessionCache {
 
+    private static final int MAX_SESSIONS = 5;
+
     public enum TaskType {
         FILE, PYTHON, SHELL, GM, NONE
     }
 
     private static SessionCache instance;
 
-    private final Map<Long, SessionData> sessions = new ConcurrentHashMap<>();
+    private final Map<Long, SessionData> sessions = new java.util.LinkedHashMap<Long, SessionData>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, SessionData> eldest) {
+            return size() > MAX_SESSIONS;
+        }
+    };
 
     public static synchronized SessionCache getInstance() {
         if (instance == null) {
@@ -35,30 +42,34 @@ public class SessionCache {
         return instance;
     }
 
-    public void put(long conversationId, SessionData data) {
+    public synchronized void put(long conversationId, SessionData data) {
         sessions.put(conversationId, data);
     }
 
-    public SessionData get(long conversationId) {
+    public synchronized SessionData get(long conversationId) {
         return sessions.get(conversationId);
     }
 
-    public void remove(long conversationId) {
+    public synchronized void remove(long conversationId) {
         sessions.remove(conversationId);
     }
 
-    public boolean hasSession(long conversationId) {
+    public synchronized boolean hasSession(long conversationId) {
         return sessions.containsKey(conversationId);
     }
 
-    public void updateState(long conversationId, String key, Object value) {
+    public synchronized void clear() {
+        sessions.clear();
+    }
+
+    public synchronized void updateState(long conversationId, String key, Object value) {
         SessionData data = sessions.get(conversationId);
         if (data != null) {
             data.intermediateState.put(key, value);
         }
     }
 
-    public Object getState(long conversationId, String key) {
+    public synchronized Object getState(long conversationId, String key) {
         SessionData data = sessions.get(conversationId);
         if (data != null) {
             return data.intermediateState.get(key);
@@ -69,7 +80,7 @@ public class SessionCache {
     /**
      * 切换任务类型，清空旧流水线临时缓存
      */
-    public void switchTaskType(long conversationId, TaskType newType) {
+    public synchronized void switchTaskType(long conversationId, TaskType newType) {
         SessionData data = sessions.get(conversationId);
         if (data == null) return;
         if (data.currentTaskType != newType) {
