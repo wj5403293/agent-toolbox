@@ -198,16 +198,19 @@ public class DeepSeekChatBridge {
             @Override
             public void run() {
                 injectChatScript(wb, requestId, message);
+                AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] injectChatScript完成, 准备启动后台等待线程");
 
                 // 后台线程等待完成，以便调 onDone / onError
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
+                        AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] 后台线程已启动, 进入latch.await");
                         try {
                             // 第一阶段：等待 JS observer 捕获回复（120 秒）
                             // 正常情况下 observer 会在几秒内捕获 LLM 回复
                             // 增加超时时间，因为 LLM 生成复杂回复可能需要较长时间
                             boolean completed = latch.await(120, TimeUnit.SECONDS);
+                            AppLogger.d("DeepSeekChatBridge", "[" + requestId + "] latch.await返回: completed=" + completed);
                             StreamCallback cb = callbacksById.get(requestId);
                             if (!completed) {
                                 // observer 未触发，尝试 Java 端兜底：直接 JS 提取 DOM 内容
