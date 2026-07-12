@@ -43,10 +43,13 @@ public class AppLogger {
 
     /** 后台文件写入线程池（单线程，防堆积） */
     private final ExecutorService fileWriter =
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "AppLogger-File");
-            t.setDaemon(true);
-            return t;
+        Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "AppLogger-File");
+                t.setDaemon(true);
+                return t;
+            }
         });
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
