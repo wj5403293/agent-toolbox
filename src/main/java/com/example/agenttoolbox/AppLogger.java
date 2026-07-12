@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 统一日志门面 — 同时输出到 UI (OnLogListener)、logcat 和本地文件
@@ -17,6 +19,8 @@ import java.util.Locale;
  * 日志格式: [HH:mm:ss.SSS] [LEVEL] [TAG] 消息
  * <p>
  * 文件日志: &lt;filesDir&gt;/logs/mcp.log，超过 1MB 自动清空重写。
+ * 文件 I/O 在后台线程执行，不阻塞调用线程。
+ * 单条日志超过 8KB 自动截断，防止大消息撑爆内存。
  * <p>
  * 支持级别: DEBUG / INFO / WARN / ERROR
  * 支持敏感数据截断: logger.info("TAG", longMessage, 2000) 自动截断超长消息
@@ -33,6 +37,15 @@ public class AppLogger {
     private int defaultMaxLen = 0; // 0 = 不限制
     private File logFile;
     private static final long MAX_LOG_FILE_SIZE = 1 * 1024 * 1024; // 1MB
+    private static final int MAX_MSG_LENGTH = 8 * 1024; // 单条日志最大 8KB
+
+    /** 后台文件写入线程池（单线程，防堆积） */
+    private final ExecutorService fileWriter =
+        Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "AppLogger-File");
+            t.setDaemon(true);
+            return t;
+        });
 
     private final SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
 
@@ -139,6 +152,10 @@ public class AppLogger {
         if (actualMaxLen > 0 && safeMsg != null && safeMsg.length() > actualMaxLen) {
             safeMsg = safeMsg.substring(0, actualMaxLen) + " ...[截断 " + (safeMsg.length() - actualMaxLen) + " 字符]";
         }
+        // 硬限制：单条日志不超过 8KB（防止 JSBridge 等传入 500KB+ 消息撑爆内存）
+        if (safeMsg != null && safeMsg.length() > MAX_MSG_LENGTH) {
+            safeMsg = safeMsg.substring(0, MAX_MSG_LENGTH) + " ...[截断 " + (safeMsg.length() - MAX_MSG_LENGTH) + " 字符]";
+        }
 
         String timestamp = sdf.format(new Date());
         String levelTag = (level >= 0 && level < LEVEL_TAGS.length) ? LEVEL_TAGS[level] : "????";
@@ -161,14 +178,16 @@ public class AppLogger {
             }
         }
 
-        // 输出到本地文件（自动处理 1MB 旋转）
-        writeToFile(formattedMsg);
+        // 异步输出到本地文件，不阻塞调用线程
+        final String finalMsg = formattedMsg;
+        fileWriter.submit(() -> writeToFile(finalMsg));
     }
 
     /**
      * 写入日志到本地文件，超过 1MB 自动清空重写。
+     * 仅在 fileWriter 后台线程中调用。
      */
-    private synchronized void writeToFile(String message) {
+    private void writeToFile(String message) {
         if (logFile == null) return;
         try {
             // 超过 1MB：清空重写
@@ -177,10 +196,14 @@ public class AppLogger {
                 logFile.createNewFile();
             }
             FileOutputStream fos = new FileOutputStream(logFile, true); // append
-            OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
-            writer.write(message);
-            writer.write('\n');
-            writer.close();
+            try {
+                OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
+                writer.write(message);
+                writer.write('\n');
+                writer.close();
+            } finally {
+                fos.close();
+            }
         } catch (Exception ignored) {
             // 文件日志失败不应影响主流程
         }

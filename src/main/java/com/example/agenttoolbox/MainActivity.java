@@ -51,8 +51,12 @@ public class MainActivity extends Activity {
     
     private McpServer mcpServer;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Handler uiLogHandler = new Handler(Looper.getMainLooper());
     private Deque<String> logDeque = new LinkedList<>();
-    private static final int MAX_LOGS = 1000;  // 最多保存1000条日志
+    private int logTotalChars = 0; // 当前 deque 中总字符数
+    private static final int MAX_LOGS = 500;       // 最多保存 500 条（原 1000）
+    private static final int MAX_LOG_CHARS = 200 * 1024;         // 总字符上限 200KB
+    private static final int MAX_DISPLAY_MSG_LEN = 2 * 1024;     // 单条显示截断 2KB
     
     private static final int DEFAULT_PORT = 8080;
     private int currentPort = DEFAULT_PORT;
@@ -436,34 +440,52 @@ public class MainActivity extends Activity {
     
     /**
      * 添加日志（新日志显示在最上面）
+     * 内存安全：截断长消息、限制总字符数、批量更新 UI。
      */
     private void appendLog(String message) {
-        String newLog = "[" + getCurrentTime() + "] " + message;
-        // 将新日志插入到队列前面，使最新的日志显示在最上面
+        // 截断超长消息（防止 JSBridge 传入 500KB+ JSON 撑爆内存）
+        String displayMsg = message;
+        if (displayMsg != null && displayMsg.length() > MAX_DISPLAY_MSG_LEN) {
+            displayMsg = displayMsg.substring(0, MAX_DISPLAY_MSG_LEN)
+                + "...[截断 " + (displayMsg.length() - MAX_DISPLAY_MSG_LEN) + " 字符]";
+        }
+        String newLog = "[" + getCurrentTime() + "] " + (displayMsg != null ? displayMsg : "");
+        int newLen = newLog.length();
+
+        // 将新日志插入到队列前面
         logDeque.addFirst(newLog);
-        
-        // 限制日志条数，防止内存溢出
-        if (logDeque.size() > MAX_LOGS) {
-            logDeque.removeLast();
+        logTotalChars += newLen;
+
+        // 限制总字符数（优先于条数限制）：从尾部移除直到低于上限
+        while (logTotalChars > MAX_LOG_CHARS && logDeque.size() > 1) {
+            String removed = logDeque.removeLast();
+            logTotalChars -= removed.length();
         }
-        
-        // 构建显示文本 - 每次都重建是可接受的，因为日志条数有限
-        // 对于MAX_LOGS=1000，整个日志文本也只有~100KB，性能影响最小
-        StringBuilder displayText = new StringBuilder();
-        for (String log : logDeque) {
-            displayText.append(log).append("\n");
+        // 兜底条数限制
+        while (logDeque.size() > MAX_LOGS) {
+            String removed = logDeque.removeLast();
+            logTotalChars -= removed.length();
         }
-        tvLog.setText(displayText.toString());
-        
-        // 自动滚动到顶部
-        final ScrollView scrollView = (ScrollView) tvLog.getParent();
-        scrollView.post(new Runnable() {
-            @Override
-            public void run() {
-                scrollView.scrollTo(0, 0);
-            }
-        });
+
+        // 使用 Handler 节流 UI 更新：200ms 内的多次 appendLog 只刷新一次
+        uiLogHandler.removeCallbacks(uiRefreshRunnable);
+        uiLogHandler.postDelayed(uiRefreshRunnable, 200);
     }
+
+    /** 批量刷新 UI 日志显示 */
+    private final Runnable uiRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            StringBuilder displayText = new StringBuilder(logTotalChars + logDeque.size());
+            for (String log : logDeque) {
+                displayText.append(log).append('\n');
+            }
+            tvLog.setText(displayText.toString());
+            // 自动滚动到顶部
+            ScrollView scrollView = (ScrollView) tvLog.getParent();
+            scrollView.scrollTo(0, 0);
+        }
+    };
     
     /**
      * 获取当前时间字符串
