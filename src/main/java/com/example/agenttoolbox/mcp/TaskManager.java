@@ -3,7 +3,7 @@ package com.example.agenttoolbox.mcp;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import android.util.Log;
+import com.example.agenttoolbox.AppLogger;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -31,7 +31,7 @@ public class TaskManager {
     }
 
     private void log(String msg) {
-        Log.d("TaskManager", msg);
+        AppLogger.d("TaskManager", msg);
     }
 
     /**

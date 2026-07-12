@@ -2,7 +2,7 @@ package com.example.agenttoolbox.skills;
 
 import android.content.Context;
 import android.content.res.AssetManager;
-import android.util.Log;
+import com.example.agenttoolbox.AppLogger;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -74,15 +74,15 @@ public class SkillManager {
         File base = (extDir != null) ? new File(extDir, "skills") : null;
         if (base != null) {
             if (!base.exists()) base.mkdirs();
-            Log.i(TAG, "运行时技能目录: " + base.getAbsolutePath());
+            AppLogger.i(TAG, "运行时技能目录: " + base.getAbsolutePath());
         } else {
-            Log.w(TAG, "无法获取外部存储，运行时技能不可用");
+            AppLogger.w(TAG, "无法获取外部存储，运行时技能不可用");
         }
         discoverAssets();
         if (base != null) discoverRuntime(base);
-        Log.i(TAG, "已加载 " + skills.size() + " 个技能，注册工具 " + registeredToolNames.size() + " 个");
+        AppLogger.i(TAG, "已加载 " + skills.size() + " 个技能，注册工具 " + registeredToolNames.size() + " 个");
         for (Skill s : skills) {
-            Log.i(TAG, "  技能: " + s.id + " (from=" + (s.fromAssets ? "assets" : "runtime") + ")");
+            AppLogger.i(TAG, "  技能: " + s.id + " (from=" + (s.fromAssets ? "assets" : "runtime") + ")");
         }
     }
 
@@ -102,7 +102,7 @@ public class SkillManager {
                 Skill skill = buildSkillFromAssets(am, id);
                 if (skill != null) addSkill(skill);
             } catch (Exception e) {
-                Log.w(TAG, "跳过 assets 技能 " + id + ": " + e.getMessage());
+                AppLogger.w(TAG, "跳过 assets 技能 " + id + ": " + e.getMessage());
             }
         }
     }
@@ -146,12 +146,12 @@ public class SkillManager {
     // ============ 发现：运行时外部目录 ============
     private void discoverRuntime(File base) {
         if (!base.exists() || !base.isDirectory()) {
-            Log.d(TAG, "运行时技能目录不存在: " + base.getAbsolutePath());
+            AppLogger.d(TAG, "运行时技能目录不存在: " + base.getAbsolutePath());
             return;
         }
         File[] entries = base.listFiles();
         if (entries == null || entries.length == 0) {
-            Log.d(TAG, "运行时技能目录为空: " + base.getAbsolutePath());
+            AppLogger.d(TAG, "运行时技能目录为空: " + base.getAbsolutePath());
             return;
         }
         for (File d : entries) {
@@ -166,7 +166,7 @@ public class SkillManager {
                 }
                 if (skill != null) addSkill(skill);
             } catch (Exception e) {
-                Log.w(TAG, "跳过运行时技能 " + d.getName() + ": " + e.getMessage());
+                AppLogger.w(TAG, "跳过运行时技能 " + d.getName() + ": " + e.getMessage());
             }
         }
     }
@@ -259,7 +259,7 @@ public class SkillManager {
         for (Skill.ToolDef td : skill.tools) {
             // 冲突处理：同名工具已存在则跳过，保证内置/APK 工具优先
             if (ToolManager.getInstance().getTool(td.name) != null) {
-                Log.w(TAG, "工具名冲突，跳过技能工具: " + td.name);
+                AppLogger.w(TAG, "工具名冲突，跳过技能工具: " + td.name);
                 continue;
             }
             SkillTool st = new SkillTool(skill.id, td.name, td.description, td.inputSchema,

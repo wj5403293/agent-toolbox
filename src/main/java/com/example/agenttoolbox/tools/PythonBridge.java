@@ -2,6 +2,8 @@ package com.example.agenttoolbox.tools;
 
 import android.content.Context;
 
+import com.example.agenttoolbox.AppLogger;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -44,16 +46,16 @@ public class PythonBridge {
         pythonHome = new File(context.getFilesDir(), PYTHON_DIR_NAME);
         File versionFile = new File(context.getFilesDir(), VERSION_FILE);
 
-        android.util.Log.i("PythonBridge", "init: jniLoaded=" + jniLoaded + " jniInitOk=" + jniInitOk);
+        AppLogger.i("PythonBridge", "init: jniLoaded=" + jniLoaded + " jniInitOk=" + jniInitOk);
 
         if (jniInitOk) return true;
 
         // 解压标准库（版本不匹配时重新解压）
         if (!isStdlibReady(pythonHome) || !readFile(versionFile).equals(EXPECTED_VERSION)) {
-            android.util.Log.i("PythonBridge", "解压标准库到 " + pythonHome.getAbsolutePath() + " ...");
+            AppLogger.i("PythonBridge", "解压标准库到 " + pythonHome.getAbsolutePath() + " ...");
             extractStdlib(context);
             writeFile(versionFile, EXPECTED_VERSION);
-            android.util.Log.i("PythonBridge",
+            AppLogger.i("PythonBridge",
                 "标准库解压完成，os.py=" + new File(pythonHome, "lib/python3.14/os.py").exists());
         }
 
@@ -64,27 +66,27 @@ public class PythonBridge {
 
         try {
             String homePath = pythonHome.getAbsolutePath();
-            android.util.Log.i("PythonBridge", "JNI init: PYTHONHOME=" + homePath);
-            android.util.Log.i("PythonBridge", "JNI init: os.py=" + new File(pythonHome, "lib/python3.14/os.py").exists());
-            android.util.Log.i("PythonBridge", "JNI init: encodings=" + new File(pythonHome, "lib/python3.14/encodings/__init__.py").exists());
+            AppLogger.i("PythonBridge", "JNI init: PYTHONHOME=" + homePath);
+            AppLogger.i("PythonBridge", "JNI init: os.py=" + new File(pythonHome, "lib/python3.14/os.py").exists());
+            AppLogger.i("PythonBridge", "JNI init: encodings=" + new File(pythonHome, "lib/python3.14/encodings/__init__.py").exists());
 
             jniInitRetCode = nativeInit(homePath);
-            android.util.Log.i("PythonBridge", "JNI init 返回码: " + jniInitRetCode);
+            AppLogger.i("PythonBridge", "JNI init 返回码: " + jniInitRetCode);
 
             if (jniInitRetCode == 0) {
                 jniInitOk = true;
                 jniInitError = "";
-                android.util.Log.i("PythonBridge", "JNI 初始化成功!");
+                AppLogger.i("PythonBridge", "JNI 初始化成功!");
                 return true;
             }
 
             jniInitError = nativeGetLastError();
-            android.util.Log.e("PythonBridge", "JNI init 失败: ret=" + jniInitRetCode + " error=" + jniInitError);
+            AppLogger.e("PythonBridge", "JNI init 失败: ret=" + jniInitRetCode + " error=" + jniInitError);
             throw new Exception("JNI 初始化失败 (ret=" + jniInitRetCode + "): " + jniInitError);
 
         } catch (Throwable e) {
             jniInitError = e.getMessage();
-            android.util.Log.e("PythonBridge", "JNI init 异常: " + jniInitError);
+            AppLogger.e("PythonBridge", "JNI init 异常: " + jniInitError);
             throw new Exception("JNI 初始化异常: " + jniInitError);
         }
     }
@@ -139,7 +141,7 @@ public class PythonBridge {
         if (pythonHome.exists()) deleteRecursive(pythonHome);
         libDir.mkdirs();
 
-        android.util.Log.i("PythonBridge", "提取 " + STDLIB_ASSET_DIR + " → " + libDir.getAbsolutePath());
+        AppLogger.i("PythonBridge", "提取 " + STDLIB_ASSET_DIR + " → " + libDir.getAbsolutePath());
         extractAssetDir(context, STDLIB_ASSET_DIR, libDir);
 
         // 设置 lib-dynload 中 .so 文件的可执行权限
@@ -150,12 +152,12 @@ public class PythonBridge {
                 for (File so : sos) {
                     so.setExecutable(true, false);
                 }
-                android.util.Log.i("PythonBridge", "lib-dynload: " + sos.length + " 个 .so 已设置可执行权限");
+                AppLogger.i("PythonBridge", "lib-dynload: " + sos.length + " 个 .so 已设置可执行权限");
             }
         }
 
         // 诊断日志
-        android.util.Log.i("PythonBridge", "=== 提取后文件树 ===");
+        AppLogger.i("PythonBridge", "=== 提取后文件树 ===");
         logFileTree(pythonHome, 0);
     }
 
@@ -175,14 +177,14 @@ public class PythonBridge {
             String indent = "  ";
             for (int j = 0; j < depth; j++) indent += "  ";
             if (f.isDirectory()) {
-                android.util.Log.i("PythonBridge", indent + f.getName() + "/");
+                AppLogger.i("PythonBridge", indent + f.getName() + "/");
                 logFileTree(f, depth + 1);
             } else {
-                android.util.Log.i("PythonBridge", indent + f.getName() + " (" + f.length() + "B)");
+                AppLogger.i("PythonBridge", indent + f.getName() + " (" + f.length() + "B)");
             }
         }
         if (children.length > 20) {
-            android.util.Log.i("PythonBridge", "  ... 还有 " + (children.length - 20) + " 项");
+            AppLogger.i("PythonBridge", "  ... 还有 " + (children.length - 20) + " 项");
         }
     }
 

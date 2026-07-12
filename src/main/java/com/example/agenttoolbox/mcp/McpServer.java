@@ -1,7 +1,6 @@
 package com.example.agenttoolbox.mcp;
 
 import android.content.Context;
-import android.util.Log;
 import com.example.agenttoolbox.AppLogger;
 import com.example.agenttoolbox.DeepSeekChatBridge;
 import com.example.agenttoolbox.tools.ToolManager;
@@ -92,9 +91,7 @@ public class McpServer {
         if (logListener != null) {
             logListener.onLog(message);
         }
-        // 也输出到 logcat，便于 adb 调试
-        Log.d("McpServer", message);
-        // 路由到 AppLogger 以写入本地日志文件
+        // 路由到 AppLogger 统一输出（logcat + 本地文件），避免重复 Log.d
         AppLogger.i("McpServer", message);
     }
 
@@ -638,10 +635,10 @@ public class McpServer {
                 if (!fixed.equals(jsonStr)) {
                     try {
                         JSONObject fixedJson = new JSONObject(fixed);
-                        android.util.Log.d("McpServer", "extractJsonObject: 修复未转义双引号后解析成功");
+                        AppLogger.d("McpServer", "extractJsonObject: 修复未转义双引号后解析成功");
                         return fixedJson;
                     } catch (Exception e2) {
-                        android.util.Log.w("McpServer", "extractJsonObject: 修复后仍解析失败: " + e2.getMessage());
+                        AppLogger.w("McpServer", "extractJsonObject: 修复后仍解析失败: " + e2.getMessage());
                     }
                 }
                 return null;

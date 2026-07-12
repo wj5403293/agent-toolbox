@@ -1,6 +1,6 @@
 package com.example.agenttoolbox.gm;
 
-import android.util.Log;
+import com.example.agenttoolbox.AppLogger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +40,7 @@ public class MemoryFreezer {
             }
             return success;
         } catch (Exception e) {
-            Log.e(TAG, "freeze failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "freeze failed: " + e.getMessage(), e);
             return false;
         }
     }
@@ -94,7 +94,7 @@ public class MemoryFreezer {
                         MemoryEngine.writeMemory(item.address, item.value, item.type);
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Freeze loop error: " + e.getMessage());
+                    AppLogger.e(TAG, "Freeze loop error: " + e.getMessage());
                 }
             }
         }, 0, 100, TimeUnit.MILLISECONDS);

@@ -1,7 +1,7 @@
 package com.example.agenttoolbox.gm;
 
 import android.content.Context;
-import android.util.Log;
+import com.example.agenttoolbox.AppLogger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -31,13 +31,13 @@ public class MemoryEngine {
     public static boolean attachProcess(int pid) {
         try {
             if (!RootManager.checkRootAccess()) {
-                Log.e(TAG, "No root access");
+                AppLogger.e(TAG, "No root access");
                 return false;
             }
 
             activeRegions = getRegions(pid);
             if (activeRegions.isEmpty()) {
-                Log.e(TAG, "Process " + pid + " has no accessible regions");
+                AppLogger.e(TAG, "Process " + pid + " has no accessible regions");
                 return false;
             }
 
@@ -49,10 +49,10 @@ public class MemoryEngine {
                 totalMB += r.endAddr - r.startAddr;
             }
             totalMB /= 1024 * 1024;
-            Log.i(TAG, "Attached to process " + pid + " (" + activeRegions.size() + " regions, " + totalMB + "MB)");
+            AppLogger.i(TAG, "Attached to process " + pid + " (" + activeRegions.size() + " regions, " + totalMB + "MB)");
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to attach: " + e.getMessage(), e);
+            AppLogger.e(TAG, "Failed to attach: " + e.getMessage(), e);
             return false;
         }
     }
@@ -180,7 +180,7 @@ public class MemoryEngine {
             saveSnapshot(results, type);
 
         } catch (Exception e) {
-            Log.e(TAG, "searchExact failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "searchExact failed: " + e.getMessage(), e);
         }
 
         return results;
@@ -218,7 +218,7 @@ public class MemoryEngine {
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "filterResults failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "filterResults failed: " + e.getMessage(), e);
         }
 
         return results;
@@ -234,7 +234,7 @@ public class MemoryEngine {
             if (bytes == null) return null;
             return bytesToValue(bytes, type);
         } catch (Exception e) {
-            Log.e(TAG, "readMemory failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "readMemory failed: " + e.getMessage(), e);
             return null;
         }
     }
@@ -248,7 +248,7 @@ public class MemoryEngine {
             if (bytes == null) return false;
             return RootManager.writeMemoryViaRoot(pid, address, bytes);
         } catch (Exception e) {
-            Log.e(TAG, "writeMemory failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "writeMemory failed: " + e.getMessage(), e);
             return false;
         }
     }
@@ -317,7 +317,7 @@ public class MemoryEngine {
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "searchAob failed: " + e.getMessage(), e);
+            AppLogger.e(TAG, "searchAob failed: " + e.getMessage(), e);
         }
 
         return results;

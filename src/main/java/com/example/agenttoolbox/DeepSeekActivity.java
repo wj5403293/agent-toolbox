@@ -340,7 +340,7 @@ public class DeepSeekActivity extends Activity {
 
         if (existing != null && bridge.isWebViewLoaded()) {
             // 复用：WebView 已在后台保持登录状态，只需 attach 到新容器
-            android.util.Log.d("DeepSeekActivity", "复用已存在的 WebView（保持会话）");
+            AppLogger.d("DeepSeekActivity", "复用已存在的 WebView（保持会话）");
             webView = existing;
 
             // 从旧父容器 detach（可能）
@@ -364,7 +364,7 @@ public class DeepSeekActivity extends Activity {
             checkLoginStatus();
         } else {
             // 第一次进入：新建 WebView 并完整配置
-            android.util.Log.d("DeepSeekActivity", "创建新 WebView");
+            AppLogger.d("DeepSeekActivity", "创建新 WebView");
             webView = new WebView(getApplicationContext());
 
             // 添加到容器
@@ -532,7 +532,7 @@ public class DeepSeekActivity extends Activity {
     private void loadDeepSeek() {
         DeepSeekChatBridge bridge = DeepSeekChatBridge.getInstance();
         if (bridge.isWebViewLoaded()) {
-            android.util.Log.d("DeepSeekActivity", "loadDeepSeek: 已加载过，跳过重新 loadUrl");
+            AppLogger.d("DeepSeekActivity", "loadDeepSeek: 已加载过，跳过重新 loadUrl");
             return;
         }
         // 从 SharedPreferences 读取自定义 URL
@@ -680,7 +680,7 @@ public class DeepSeekActivity extends Activity {
                             loggedIn = true;
                         }
                     } catch (Exception e) {
-                        android.util.Log.d("DeepSeekLogin", "解析登录检测结果失败: " + value, e);
+                        AppLogger.d("DeepSeekLogin", "解析登录检测结果失败: " + value, e);
                     }
                     updateLoginStatus(loggedIn, detailInfo);
                 }
@@ -769,9 +769,9 @@ public class DeepSeekActivity extends Activity {
         try {
             // 简单解析 URL 中的参数
             // 格式: mcp://action?param1=value1&param2=value2
-            android.util.Log.d("DeepSeekDebug", "收到 mcp URL: " + url);
+            AppLogger.d("DeepSeekDebug", "收到 mcp URL: " + url);
         } catch (Exception e) {
-            android.util.Log.e("DeepSeekDebug", "处理 mcp URL 失败", e);
+            AppLogger.e("DeepSeekDebug", "处理 mcp URL 失败", e);
         }
     }
 
@@ -780,7 +780,7 @@ public class DeepSeekActivity extends Activity {
      */
     private void handleMcpMessage(String message) {
         try {
-            android.util.Log.d("DeepSeekDebug", "收到 MCP 消息: " + message.substring(0, Math.min(message.length(), 100)));
+            AppLogger.d("DeepSeekDebug", "收到 MCP 消息: " + message.substring(0, Math.min(message.length(), 100)));
 
             // 解析消息格式：MCP:{"success":true,"html":"..."} 或 MCP:{"success":false,"error":"..."}
             if (message.startsWith("{") && message.contains("\"success\"")) {

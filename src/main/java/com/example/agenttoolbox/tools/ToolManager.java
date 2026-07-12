@@ -1,6 +1,9 @@
 package com.example.agenttoolbox.tools;
 
 import android.content.Context;
+
+import com.example.agenttoolbox.AppLogger;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -92,7 +95,7 @@ public class ToolManager {
         if (!client.isEnabled()) return;
         
         if (!client.connect()) {
-            android.util.Log.w("ToolManager", "APK MCP 连接失败，跳过工具合并");
+            AppLogger.w("ToolManager", "APK MCP 连接失败，跳过工具合并");
             return;
         }
         
@@ -117,7 +120,7 @@ public class ToolManager {
                 // skip malformed tool
             }
         }
-        android.util.Log.i("ToolManager", "已合并 " + count + " 个 APK MCP 工具");
+        AppLogger.i("ToolManager", "已合并 " + count + " 个 APK MCP 工具");
     }
     
     /**

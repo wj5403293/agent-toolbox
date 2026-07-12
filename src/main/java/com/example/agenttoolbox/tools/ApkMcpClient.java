@@ -1,6 +1,6 @@
 package com.example.agenttoolbox.tools;
 
-import android.util.Log;
+import com.example.agenttoolbox.AppLogger;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -65,7 +65,7 @@ public class ApkMcpClient {
         if (connected) return true;
 
         try {
-            Log.i(TAG, "正在连接 MT APK MCP: " + mcpUrl);
+            AppLogger.i(TAG, "正在连接 MT APK MCP: " + mcpUrl);
 
             // 1. initialize
             JSONObject initParams = new JSONObject();
@@ -78,10 +78,10 @@ public class ApkMcpClient {
 
             JSONObject initResp = sendMcpRequest("initialize", initParams);
             if (initResp == null) {
-                Log.w(TAG, "initialize 失败");
+                AppLogger.w(TAG, "initialize 失败");
                 return false;
             }
-            Log.i(TAG, "initialize 成功: " + initResp.toString().substring(0, Math.min(200, initResp.toString().length())));
+            AppLogger.i(TAG, "initialize 成功: " + initResp.toString().substring(0, Math.min(200, initResp.toString().length())));
 
             // 2. 从 initialize 响应中提取工具（MT 管理器工具名自带 mt_apk_ 前缀）
             JSONArray tools = new JSONArray();
@@ -109,24 +109,24 @@ public class ApkMcpClient {
                     }
                 }
             } catch (Exception e) {
-                Log.w(TAG, "从 initialize 提取工具失败: " + e.getMessage());
+                AppLogger.w(TAG, "从 initialize 提取工具失败: " + e.getMessage());
             }
 
             if (tools.length() == 0) {
-                Log.w(TAG, "initialize 中未找到 APK 工具");
+                AppLogger.w(TAG, "initialize 中未找到 APK 工具");
                 return false;
             }
 
             remoteTools = tools;
             connected = true;
-            Log.i(TAG, "连接成功，获取到 " + tools.length() + " 个 APK 工具");
+            AppLogger.i(TAG, "连接成功，获取到 " + tools.length() + " 个 APK 工具");
 
             // 3. initialized notification
             sendMcpNotification("notifications/initialized", new JSONObject());
             return true;
 
         } catch (Exception e) {
-            Log.e(TAG, "连接失败: " + e.getMessage());
+            AppLogger.e(TAG, "连接失败: " + e.getMessage());
             connected = false;
             return false;
         }
@@ -185,7 +185,7 @@ public class ApkMcpClient {
             return resultObj;
 
         } catch (Exception e) {
-            Log.e(TAG, "callTool 失败: " + toolName + " - " + e.getMessage());
+            AppLogger.e(TAG, "callTool 失败: " + toolName + " - " + e.getMessage());
             return errorResult("调用 " + toolName + " 失败: " + e.getMessage());
         }
     }
@@ -205,7 +205,7 @@ public class ApkMcpClient {
             rpc.put("id", id);
 
             String bodyStr = rpc.toString();
-            Log.d(TAG, "请求 [" + id + "]: " + method + " (长度=" + bodyStr.length() + ")");
+            AppLogger.d(TAG, "请求 [" + id + "]: " + method + " (长度=" + bodyStr.length() + ")");
 
             URL url = new URL(mcpUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -222,7 +222,7 @@ public class ApkMcpClient {
 
             int respCode = conn.getResponseCode();
             if (respCode != 200) {
-                Log.w(TAG, method + " HTTP " + respCode + ": " + conn.getResponseMessage());
+                AppLogger.w(TAG, method + " HTTP " + respCode + ": " + conn.getResponseMessage());
                 return null;
             }
 
@@ -238,7 +238,7 @@ public class ApkMcpClient {
 
             String result = sb.toString().trim();
             if (result.isEmpty()) {
-                Log.w(TAG, method + " 返回空");
+                AppLogger.w(TAG, method + " 返回空");
                 return null;
             }
 
@@ -247,14 +247,14 @@ public class ApkMcpClient {
             if (resp.has("error")) {
                 JSONObject error = resp.optJSONObject("error");
                 String errMsg = error != null ? error.optString("message", "未知错误") : "未知错误";
-                Log.w(TAG, method + " 返回错误: " + errMsg);
+                AppLogger.w(TAG, method + " 返回错误: " + errMsg);
                 return null;
             }
 
             return resp;
 
         } catch (Exception e) {
-            Log.e(TAG, "sendMcpRequest " + method + " 异常: " + e.getMessage());
+            AppLogger.e(TAG, "sendMcpRequest " + method + " 异常: " + e.getMessage());
             return null;
         }
     }
@@ -286,7 +286,7 @@ public class ApkMcpClient {
             conn.getResponseCode(); // 忽略响应
             conn.disconnect();
         } catch (Exception e) {
-            Log.w(TAG, "sendMcpNotification 失败: " + e.getMessage());
+            AppLogger.w(TAG, "sendMcpNotification 失败: " + e.getMessage());
         }
     }
 
