@@ -54,9 +54,9 @@ public class DeepSeekActivity extends Activity {
     private JavaScriptBridge jsBridge;
     private boolean isPageLoaded = false; // 页面是否已加载完成
 
-    // DeepSeek 网址
-    private static final String DEEPSEEK_URL = "https://chat.deepseek.com";
-    private static final String DEEPSEEK_NEW_CHAT_URL = "https://chat.deepseek.com";
+    // DeepSeek 网址（可通过 SharedPreferences 覆盖）
+    private static final String DEFAULT_DEEPSEEK_URL = "https://chat.deepseek.com";
+    private String deepSeekUrl = DEFAULT_DEEPSEEK_URL;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -321,14 +321,7 @@ public class DeepSeekActivity extends Activity {
         }
         // 只首次加载 URL，后续打开不再刷新（保持页面状态）
         if (!mcpWebViewLoaded) {
-            String mcpUrl = "http://127.0.0.1:8080";
-            try {
-                com.example.agenttoolbox.mcp.McpServer server = McpForegroundService.getInstance() != null
-                    ? McpForegroundService.getInstance().getMcpServer() : null;
-                if (server != null && server.getLocalIpAddress() != null) {
-                    mcpUrl = "http://" + server.getLocalIpAddress() + ":8080";
-                }
-            } catch (Exception ignored) {}
+            String mcpUrl = buildMcpUrl();
             mcpWebView.loadUrl(mcpUrl);
             mcpWebViewLoaded = true;
         }
@@ -541,9 +534,38 @@ public class DeepSeekActivity extends Activity {
             android.util.Log.d("DeepSeekActivity", "loadDeepSeek: 已加载过，跳过重新 loadUrl");
             return;
         }
+        // 从 SharedPreferences 读取自定义 URL
+        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        deepSeekUrl = prefs.getString("deepseek_url", DEFAULT_DEEPSEEK_URL);
         setStatus("正在加载 DeepSeek...");
         tvLoginStatus.setText("检测中...");
-        webView.loadUrl(DEEPSEEK_URL);
+        webView.loadUrl(deepSeekUrl);
+    }
+
+    /**
+     * 构建 MCP 悬浮窗访问地址（从服务端动态获取）
+     */
+    private String buildMcpUrl() {
+        try {
+            com.example.agenttoolbox.mcp.McpServer server = McpForegroundService.getInstance() != null
+                ? McpForegroundService.getInstance().getMcpServer() : null;
+            if (server != null) {
+                String ip = server.getLocalIpAddress();
+                int port = server.getPort();
+                String bind = server.getBindAddress();
+                // 如果绑定的是 127.0.0.1，就用 127.0.0.1
+                if ("127.0.0.1".equals(bind)) {
+                    return "http://127.0.0.1:" + port;
+                }
+                if (ip != null) {
+                    return "http://" + ip + ":" + port;
+                }
+            }
+        } catch (Exception ignored) {}
+        // 回退：从 SharedPreferences 读取
+        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        int port = prefs.getInt("port", 8080);
+        return "http://127.0.0.1:" + port;
     }
 
     /**
@@ -670,7 +692,7 @@ public class DeepSeekActivity extends Activity {
      */
     private boolean checkLoginCookie() {
         CookieManager cookieManager = CookieManager.getInstance();
-        String cookies = cookieManager.getCookie(DEEPSEEK_URL);
+        String cookies = cookieManager.getCookie(deepSeekUrl);
 
         if (cookies == null || cookies.isEmpty()) {
             return false;

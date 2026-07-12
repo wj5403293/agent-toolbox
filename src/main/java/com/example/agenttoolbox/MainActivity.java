@@ -83,6 +83,13 @@ public class MainActivity extends Activity {
         bindAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerBind.setAdapter(bindAdapter);
 
+        // 读取上次保存的端口和绑定地址
+        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        int savedPort = prefs.getInt("port", DEFAULT_PORT);
+        String savedBind = prefs.getString("bind_address", "0.0.0.0");
+        etPort.setText(String.valueOf(savedPort));
+        spinnerBind.setSelection("127.0.0.1".equals(savedBind) ? 1 : 0);
+
         // 端口检查按钮
         btnCheckPort.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -306,6 +313,13 @@ public class MainActivity extends Activity {
                 appendLog("请更换端口后重试");
                 return;
             }
+
+            // 保存配置到 SharedPreferences
+            android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+            prefs.edit()
+                .putInt("port", currentPort)
+                .putString("bind_address", currentBindAddress)
+                .apply();
 
             mcpServer = new McpServer(currentPort, currentBindAddress, MainActivity.this);
             // 初始化统一日志门面（同时输出到 UI 和 logcat）
