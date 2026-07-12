@@ -3,6 +3,7 @@ package com.example.agenttoolbox;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -535,7 +536,7 @@ public class DeepSeekActivity extends Activity {
             return;
         }
         // 从 SharedPreferences 读取自定义 URL
-        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
         deepSeekUrl = prefs.getString("deepseek_url", DEFAULT_DEEPSEEK_URL);
         setStatus("正在加载 DeepSeek...");
         tvLoginStatus.setText("检测中...");
@@ -563,7 +564,7 @@ public class DeepSeekActivity extends Activity {
             }
         } catch (Exception ignored) {}
         // 回退：从 SharedPreferences 读取
-        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
         int port = prefs.getInt("port", 8080);
         return "http://127.0.0.1:" + port;
     }

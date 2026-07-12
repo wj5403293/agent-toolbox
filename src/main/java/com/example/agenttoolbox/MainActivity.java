@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -84,7 +85,7 @@ public class MainActivity extends Activity {
         spinnerBind.setAdapter(bindAdapter);
 
         // 读取上次保存的端口和绑定地址
-        android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
         int savedPort = prefs.getInt("port", DEFAULT_PORT);
         String savedBind = prefs.getString("bind_address", "0.0.0.0");
         etPort.setText(String.valueOf(savedPort));
@@ -315,7 +316,7 @@ public class MainActivity extends Activity {
             }
 
             // 保存配置到 SharedPreferences
-            android.SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
+            SharedPreferences prefs = getSharedPreferences("mcp_config", MODE_PRIVATE);
             prefs.edit()
                 .putInt("port", currentPort)
                 .putString("bind_address", currentBindAddress)
