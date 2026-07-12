@@ -65,10 +65,13 @@ public class ShellTool implements Tool {
             throw new Exception("命令不能为空");
         }
 
-        // 截获 python 命令，桥接到内嵌 Python 环境
+        // 截获 python/pip 命令，桥接到内嵌 Python 环境
         String trimmed = command.trim();
         if (trimmed.startsWith("python3 ") || trimmed.startsWith("python ") || trimmed.equals("python3") || trimmed.equals("python")) {
             return executePython(trimmed, timeout);
+        }
+        if (trimmed.startsWith("pip ") || trimmed.equals("pip")) {
+            return executePython("python -m " + trimmed, timeout);
         }
 
         ProcessRunner.Result result = ProcessRunner.execShell(command, timeout);
@@ -116,6 +119,10 @@ public class ShellTool implements Tool {
                     (code.startsWith("'") && code.endsWith("'"))) {
                     code = code.substring(1, code.length() - 1);
                 }
+            } else if (args.startsWith("-m ")) {
+                // python -m module args — 执行模块
+                String moduleArgs = args.substring(3).trim();
+                code = "import sys, runpy; sys.argv = ['" + moduleArgs.replace("\"", "\\\"") + "'].split(); runpy.run_module('" + moduleArgs.split(" ")[0] + "', run_name='__main__')";
             } else if (!args.isEmpty()) {
                 String path = args;
                 java.io.File file = new java.io.File(path);
