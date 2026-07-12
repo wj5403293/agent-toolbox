@@ -185,7 +185,12 @@ public class AppLogger {
 
         // 异步输出到本地文件，不阻塞调用线程
         final String finalMsg = formattedMsg;
-        fileWriter.submit(() -> writeToFile(finalMsg));
+        fileWriter.submit(new Runnable() {
+            @Override
+            public void run() {
+                writeToFile(finalMsg);
+            }
+        });
     }
 
     /**
