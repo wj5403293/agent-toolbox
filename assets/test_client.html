@@ -921,6 +921,7 @@
             word-break: break-word;
             line-height: 1.7;
             font-size: 14px;
+            overflow-x: auto;
         }
         .md-body h1, .md-body h2, .md-body h3,
         .md-body h4, .md-body h5, .md-body h6 {
@@ -981,16 +982,18 @@
         }
         .md-body table {
             border-collapse: collapse;
-            width: 100%;
+            width: max-content;
+            max-width: 100%;
             margin: 0.5em 0;
             font-size: 0.92em;
             border-radius: 8px;
-            overflow: hidden;
+            table-layout: auto;
         }
         .md-body th, .md-body td {
             border: 1px solid #e2e8f0;
             padding: 8px 12px;
             text-align: left;
+            white-space: nowrap;
         }
         .md-body th {
             background: #f1f5f9;
