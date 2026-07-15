@@ -32,6 +32,8 @@ public class PythonBridge {
     private static int jniInitRetCode = 0;
     private static String jniInitError = "";
     private static File pythonHome;
+    // pip 引导状态：避免每次 exec 都重复跑 ensurepip
+    private static boolean pipBootstrapped = false;
 
     static {
         try {
@@ -77,6 +79,10 @@ public class PythonBridge {
                 jniInitOk = true;
                 jniInitError = "";
                 AppLogger.i("PythonBridge", "JNI 初始化成功!");
+                // 引导安装 pip：stdlib 自带 ensurepip + bundled pip wheel，
+                // bootstrap 后 pip 才会装到 site-packages，否则 `import pip` 失败。
+                // 失败不阻断初始化（pip 非核心功能），仅记日志。
+                ensurePip();
                 return true;
             }
 
@@ -118,6 +124,34 @@ public class PythonBridge {
     public static void shutdown() {
         if (jniLoaded) {
             try { nativeShutdown(); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * 引导安装 pip。
+     * stdlib 自带 ensurepip 模块 + bundled pip wheel，但 pip 未预装到
+     * site-packages，导致 `import pip` / `python -m pip` 失败。
+     * 在初始化成功后自动 bootstrap 一次（幂等，已装则跳过）。
+     * 失败不阻断主流程，pip 相关命令的错误由 Python 自身暴露。
+     */
+    private static void ensurePip() {
+        if (pipBootstrapped) return;
+        pipBootstrapped = true;
+        try {
+            // 先检测 pip 是否已可用，避免重复 bootstrap
+            String check = nativeExec("import importlib.util; "
+                + "print('PIP_OK' if importlib.util.find_spec('pip') else 'PIP_MISSING')");
+            if (check != null && check.contains("PIP_OK")) {
+                AppLogger.i("PythonBridge", "pip 已就绪，跳过 ensurepip");
+                return;
+            }
+            AppLogger.i("PythonBridge", "pip 缺失，执行 ensurepip.bootstrap()...");
+            // bootstrap() 安装 bundled pip wheel 到 site-packages
+            String out = nativeExec(
+                "import ensurepip; ensurepip.bootstrap(upgrade=False, user=False); print('ENSUREPIP_DONE')");
+            AppLogger.i("PythonBridge", "ensurepip 输出: " + (out == null ? "(null)" : out));
+        } catch (Throwable e) {
+            AppLogger.w("PythonBridge", "ensurepip 引导失败（pip 功能可能不可用）: " + e.getMessage());
         }
     }
 

@@ -2404,7 +2404,9 @@
                 const contentEl = appendToMsgEl.querySelector('.message-content');
                 if (!contentEl) return null;
                 const resultDiv = document.createElement('div');
-                resultDiv.style.cssText = 'margin-top: 8px; padding: 10px 14px; border-radius: 12px; font-size: 13px; background: ' + (isError ? '#fef2f2' : '#f8fafc') + '; border: 1px solid ' + (isError ? '#fecaca' : '#e2e8f0') + '; color: ' + (isError ? '#b91c1c' : '#475569') + ';';
+                // 工具结果卡片与下方文字 bubble 之间留出间距（margin-bottom），
+                // 否则两者紧贴无分隔，影响阅读；margin-top 与上方 label 保持间距
+                resultDiv.style.cssText = 'margin-top: 8px; margin-bottom: 10px; padding: 10px 14px; border-radius: 12px; font-size: 13px; background: ' + (isError ? '#fef2f2' : '#f8fafc') + '; border: 1px solid ' + (isError ? '#fecaca' : '#e2e8f0') + '; color: ' + (isError ? '#b91c1c' : '#475569') + ';';
                 resultDiv.innerHTML = '<div style="font-weight:600; margin-bottom:4px;">🔧 ' + escapeHtml(toolName) + '</div><div class="md-body" style="white-space:pre-wrap;">' + renderMarkdown(result) + '</div>';
                 const bubbleEl = contentEl.querySelector('.message-bubble');
                 if (bubbleEl) contentEl.insertBefore(resultDiv, bubbleEl);
