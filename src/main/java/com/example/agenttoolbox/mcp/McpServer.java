@@ -1495,6 +1495,54 @@ public class McpServer {
                                 updateSessionState(cachedSession, toolNameForLog, replyJson.optJSONObject("params"), toolResult);
                             }
 
+                            // 兼容：LLM 可能在工具调用 JSON 中同时带 result.plan_update
+                            // （虽然 JSON-RPC 不推荐 method+result 共存，但 LLM 常这样输出）
+                            // 此处处理 plan_update，避免计划推进指令被丢弃
+                            if (cachedSession != null && replyJson.has("result")) {
+                                try {
+                                    JSONObject resultInToolCall = replyJson.optJSONObject("result");
+                                    if (resultInToolCall != null && resultInToolCall.has("plan_update")) {
+                                        JSONObject planUpdate = resultInToolCall.optJSONObject("plan_update");
+                                        if (planUpdate != null) {
+                                            log("[PLAN] 工具调用中检测到 plan_update: " + planUpdate.toString());
+                                            String planAction = planUpdate.optString("action", "");
+                                            TaskManager tm = cachedSession.taskManager;
+                                            switch (planAction) {
+                                                case "complete_task":
+                                                case "mark_done": {
+                                                    String taskId = planUpdate.optString("task_id", "");
+                                                    if (!taskId.isEmpty()) {
+                                                        tm.markTaskDone(cachedSession.planState, taskId);
+                                                    } else if (cachedSession.planState.activeTask != null) {
+                                                        tm.markCurrentDone(cachedSession.planState);
+                                                    }
+                                                    break;
+                                                }
+                                                case "mark_failed": {
+                                                    String taskId = planUpdate.optString("task_id", "");
+                                                    String reason = planUpdate.optString("reason", "未知错误");
+                                                    if (!taskId.isEmpty()) {
+                                                        tm.markTaskFailed(cachedSession.planState, taskId, reason);
+                                                    }
+                                                    break;
+                                                }
+                                                case "update_plan": {
+                                                    JSONObject newPlan = planUpdate.optJSONObject("plan");
+                                                    if (newPlan != null && newPlan.has("tasks")) {
+                                                        tm.loadPlan(cachedSession.planState, newPlan);
+                                                        cachedSession.planState.confirmed = true;
+                                                        writePlanEvent(out, cachedSession.planState, "updated");
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    log("[PLAN] 工具调用中处理 plan_update 异常: " + e.getMessage());
+                                }
+                            }
+
                             // 待办计划：推送进度到前端（不由系统自动推进，由 LLM 通过 plan_update 控制）
                             if (cachedSession != null) {
                                 writePlanEvent(out, cachedSession.planState, "progress");

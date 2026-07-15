@@ -2297,51 +2297,80 @@
         /**
          * 从可能不完整的 JSON 字符串中提取 content 字段
          * 支持完整JSON解析、正则提取、流式过程中的部分JSON
+         * 也支持 JSON 前后有附加文本的情况（如 "好的，我来读取文件\n{...}"）
          */
         function tryExtractJsonContent(text) {
-            if (!text || !text.trim().startsWith('{')) return { text: text, isJson: false };
+            if (!text) return { text: text, isJson: false };
             const trimmed = text.trim();
+            if (!trimmed) return { text: text, isJson: false };
+
+            // 如果文本不以 { 开头，尝试从文本中提取第一个 {...} JSON 块
+            // 与后端 extractJsonObject 对齐：LLM 可能在 JSON 前写说明文字
+            let jsonStart = trimmed.indexOf('{');
+            if (jsonStart === -1) return { text: text, isJson: false };
+
+            // 提取 JSON 前的前置文本（如有）
+            let prefixText = '';
+            let jsonPart = trimmed;
+            if (jsonStart > 0) {
+                prefixText = trimmed.substring(0, jsonStart).trim();
+                jsonPart = trimmed.substring(jsonStart);
+            }
 
             // 尝试完整解析（JSON-RPC 2.0）
             try {
-                const parsed = JSON.parse(trimmed);
+                const parsed = JSON.parse(jsonPart);
                 // 工具调用：method=tools/call
                 if (parsed.method === 'tools/call' && parsed.params) {
                     const toolName = parsed.params.name || '';
-                    return { text: text, isJson: true, action: 'tool_call', toolName: toolName, raw: trimmed };
+                    // 如果工具调用同时带了 result.plan_update，提取出来供后续使用
+                    let planUpdate = null;
+                    if (parsed.result && parsed.result.plan_update) {
+                        planUpdate = parsed.result.plan_update;
+                    }
+                    return { text: text, isJson: true, action: 'tool_call', toolName: toolName, raw: trimmed,
+                             prefixText: prefixText, planUpdate: planUpdate };
                 }
                 // 文本回复：result.type=reply
                 if (parsed.result && parsed.result.type === 'reply' && typeof parsed.result.content === 'string') {
-                    return { text: parsed.result.content, isJson: true, action: 'reply', raw: trimmed };
+                    const fullText = prefixText ? (prefixText + '\n\n' + parsed.result.content) : parsed.result.content;
+                    return { text: fullText, isJson: true, action: 'reply', raw: trimmed, prefixText: prefixText };
                 }
                 // 错误响应
                 if (parsed.error && parsed.error.message) {
-                    return { text: parsed.error.message, isJson: true, action: 'reply', raw: trimmed };
+                    return { text: parsed.error.message, isJson: true, action: 'reply', raw: trimmed, prefixText: prefixText };
                 }
                 // 兼容：result.content 字符串
                 if (parsed.result && typeof parsed.result.content === 'string') {
-                    return { text: parsed.result.content, isJson: true, action: 'reply', raw: trimmed };
+                    const fullText = prefixText ? (prefixText + '\n\n' + parsed.result.content) : parsed.result.content;
+                    return { text: fullText, isJson: true, action: 'reply', raw: trimmed, prefixText: prefixText };
                 }
             } catch (e) {}
 
             // 流式过程中JSON不完整，尝试用正则提取 result.content
-            const contentMatch = trimmed.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+            const contentMatch = jsonPart.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
             if (contentMatch) {
                 try {
                     const extracted = JSON.parse('"' + contentMatch[1] + '"');
-                    return { text: extracted, isJson: true, action: 'reply', partial: true, raw: trimmed };
+                    const fullText = prefixText ? (prefixText + '\n\n' + extracted) : extracted;
+                    return { text: fullText, isJson: true, action: 'reply', partial: true, raw: trimmed, prefixText: prefixText };
                 } catch (e2) {
                     const extracted = contentMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-                    return { text: extracted, isJson: true, action: 'reply', partial: true, raw: trimmed };
+                    const fullText = prefixText ? (prefixText + '\n\n' + extracted) : extracted;
+                    return { text: fullText, isJson: true, action: 'reply', partial: true, raw: trimmed, prefixText: prefixText };
                 }
             }
 
             // 检测是否为工具调用（method=tools/call，即使JSON不完整）
-            if (trimmed.indexOf('"method":"tools/call"') !== -1 || trimmed.indexOf('"method": "tools/call"') !== -1) {
-                const nameMatch = trimmed.match(/"name"\s*:\s*"([^"]+)"/);
-                return { text: text, isJson: true, action: 'tool_call', toolName: nameMatch ? nameMatch[1] : '', partial: true, raw: trimmed };
+            if (jsonPart.indexOf('"method":"tools/call"') !== -1 || jsonPart.indexOf('"method": "tools/call"') !== -1) {
+                const nameMatch = jsonPart.match(/"name"\s*:\s*"([^"]+)"/);
+                return { text: text, isJson: true, action: 'tool_call', toolName: nameMatch ? nameMatch[1] : '', partial: true, raw: trimmed, prefixText: prefixText };
             }
 
+            // 无法识别为 JSON-RPC，但有前置文本时返回前置文本
+            if (prefixText) {
+                return { text: prefixText, isJson: false, prefixText: prefixText };
+            }
             return { text: text, isJson: false };
         }
 
@@ -3009,7 +3038,12 @@
                             let displayText = extracted.text;
                             // 如果是tool_call，显示工具调用状态
                             if (extracted.isJson && extracted.action === 'tool_call') {
-                                activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                // 如果工具调用前有前置文本，先显示文本再追加工具状态
+                                if (extracted.prefixText) {
+                                    activeBubbleEl.innerHTML = '<div class="md-body">' + renderMarkdown(extracted.prefixText) + '</div><div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;">' + escapeHtml(formatToolCallStatus(extracted.toolName)) + '</div>';
+                                } else {
+                                    activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                }
                                 hasToolCallDetected = true;
                                 finalToolCall = extracted.raw || streamContent;
                                 setState('工具调用中');
@@ -3084,7 +3118,12 @@
                                 if (!hasToolCallDetected) {
                                     hasToolCallDetected = true;
                                     finalToolCall = content;
-                                    activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                    // 如果工具调用前有前置文本，先显示文本再追加工具状态
+                                    if (extracted.prefixText) {
+                                        activeBubbleEl.innerHTML = '<div class="md-body">' + renderMarkdown(extracted.prefixText) + '</div><div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;">' + escapeHtml(formatToolCallStatus(extracted.toolName)) + '</div>';
+                                    } else {
+                                        activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                    }
                                     setState('工具调用中');
                                 }
                             } else {
@@ -3139,7 +3178,12 @@
                                 finalToolCall = obj.content;
                                 if (!hasToolCallDetected) {
                                     hasToolCallDetected = true;
-                                    activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                    // 如果工具调用前有前置文本，先显示文本再追加工具状态
+                                    if (extracted.prefixText) {
+                                        activeBubbleEl.innerHTML = '<div class="md-body">' + renderMarkdown(extracted.prefixText) + '</div><div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;">' + escapeHtml(formatToolCallStatus(extracted.toolName)) + '</div>';
+                                    } else {
+                                        activeBubbleEl.textContent = formatToolCallStatus(extracted.toolName);
+                                    }
                                     setState('工具调用中');
                                 }
                             } else if (obj.content.length > 0) {
