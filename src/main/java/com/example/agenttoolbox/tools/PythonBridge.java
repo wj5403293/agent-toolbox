@@ -25,7 +25,8 @@ public class PythonBridge {
     private static final String STDLIB_ASSET_DIR = "python/stdlib";
     private static final String PYTHON_DIR_NAME = "python";
     private static final String VERSION_FILE = ".python_version";
-    private static final String EXPECTED_VERSION = "3.14.6-official-v1";
+    // v2: 修复 stdlib 提取丢失无扩展名子目录（如 zipfile/_path）的 bug，需重新提取
+    private static final String EXPECTED_VERSION = "3.14.6-official-v2";
 
     private static boolean jniLoaded = false;
     private static boolean jniInitOk = false;
@@ -226,9 +227,11 @@ public class PythonBridge {
     }
 
     private static boolean isStdlibReady(File dir) {
+        // 校验关键文件 + 易丢失的无扩展名子目录（曾因提取 bug 丢失 zipfile/_path）
         return dir.exists()
             && new File(dir, "lib/python3.14/os.py").exists()
-            && new File(dir, "lib/python3.14/encodings/__init__.py").exists();
+            && new File(dir, "lib/python3.14/encodings/__init__.py").exists()
+            && new File(dir, "lib/python3.14/zipfile/_path/__init__.py").exists();
     }
 
     private static void logFileTree(File dir, int depth) {
