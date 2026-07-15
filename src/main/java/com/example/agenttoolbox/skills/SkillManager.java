@@ -250,6 +250,32 @@ public class SkillManager {
     }
 
     private void addSkill(Skill skill) {
+        // 去重：相同 id 的 skill 只保留一份。
+        // discover() 先扫 assets 再扫 runtime，若用户在 runtime 目录放了与内置同 id 的 skill
+        // （或同时存在 文件夹模式 <id>/ 和 单文件模式 <id>.md），都会触发此处。
+        // 策略：runtime 覆盖 assets（用户自定义优先）；同来源重复则保留已注册的。
+        Skill existing = skillById.get(skill.id);
+        if (existing != null) {
+            if (existing.fromAssets && !skill.fromAssets) {
+                // runtime 覆盖 assets：从 list 移除旧的，并移除其已注册的工具，
+                // 否则 registerSkillTools 会因工具名冲突跳过，导致工具仍是旧 assets 版本
+                skills.remove(existing);
+                if (!existing.tools.isEmpty()) {
+                    java.util.Set<String> oldToolNames = new HashSet<>();
+                    for (Skill.ToolDef td : existing.tools) oldToolNames.add(td.name);
+                    ToolManager.getInstance().removeTools(oldToolNames);
+                    registeredToolNames.removeAll(oldToolNames);
+                }
+                AppLogger.i(TAG, "技能 " + skill.id + " 被 runtime 版本覆盖");
+            } else {
+                // 同来源重复或 assets 覆盖 runtime（后者理论不会发生，因 assets 先扫）
+                // 跳过新 skill，保留已注册的，避免重复
+                AppLogger.w(TAG, "技能 " + skill.id + " 重复，跳过 (existing from="
+                        + (existing.fromAssets ? "assets" : "runtime")
+                        + ", new from=" + (skill.fromAssets ? "assets" : "runtime") + ")");
+                return;
+            }
+        }
         skills.add(skill);
         skillById.put(skill.id, skill);
         registerSkillTools(skill);
