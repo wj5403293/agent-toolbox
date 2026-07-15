@@ -1,9 +1,14 @@
-name: Build APK
+name: Build & Release APK
 
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+# 创建 Release / 移动 tag 需要 contents: write 权限
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -12,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -34,6 +41,35 @@ jobs:
           echo "/opt/gradle-7.5.1/bin" >> $GITHUB_PATH
           /opt/gradle-7.5.1/bin/gradle --version
 
+      - name: Detect release context
+        id: ctx
+        # 区分两种触发：打 v* tag → 正式版（同步版本号到 APK）；推 main → 滚动 latest 预发布
+        run: |
+          SHORT_SHA=${GITHUB_SHA::7}
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}          # v2.1.8
+            VERSION=${TAG#v}                        # 2.1.8
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            VERSION_CODE=$((MAJOR*100 + MINOR*10 + PATCH))
+            echo "is_tag=true" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+            echo "apk_name=agent-toolbox-$TAG.apk" >> $GITHUB_OUTPUT
+            echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+            echo "release_title=$TAG" >> $GITHUB_OUTPUT
+            echo "release_kind=tag" >> $GITHUB_OUTPUT
+            echo "检测到 tag 触发: $TAG (versionName=$VERSION, versionCode=$VERSION_CODE)"
+          else
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+            echo "apk_name=agent-toolbox-latest-$SHORT_SHA.apk" >> $GITHUB_OUTPUT
+            echo "release_tag=latest" >> $GITHUB_OUTPUT
+            echo "release_title=最新构建" >> $GITHUB_OUTPUT
+            echo "release_kind=main" >> $GITHUB_OUTPUT
+            echo "检测到 main 推送: 滚动 latest 预发布 ($SHORT_SHA)"
+          fi
+
       - name: Patch build files for CI
         # 项目用 AIDE Pro 在安卓上构建，build.gradle / gradle.properties
         # 硬编码了安卓设备路径，CI 上不存在，需临时改写（不影响仓库源文件）
@@ -43,9 +79,17 @@ jobs:
           echo "=== 移除 gradle.properties 里的安卓硬编码路径 ==="
           sed -i '/org.gradle.project.buildDir=/d' gradle.properties
           sed -i '/org.gradle.java.home=/d' gradle.properties
+          # tag 触发时把 tag 版本号同步进 APK（versionName / versionCode）
+          if [[ "${{ steps.ctx.outputs.is_tag }}" == "true" ]]; then
+            V="${{ steps.ctx.outputs.version }}"
+            VC="${{ steps.ctx.outputs.version_code }}"
+            echo "=== 同步版本号到 build.gradle: versionName=$V versionCode=$VC ==="
+            sed -i "s|versionCode [0-9]*|versionCode $VC|" build.gradle
+            sed -i "s|versionName \".*\"|versionName \"$V\"|" build.gradle
+          fi
           echo "=== 修改后预览 ==="
-          echo "--- build.gradle (前 25 行) ---"
-          sed -n '1,25p' build.gradle
+          echo "--- build.gradle (前 30 行) ---"
+          sed -n '1,30p' build.gradle
           echo "--- gradle.properties ---"
           cat gradle.properties
 
@@ -58,18 +102,53 @@ jobs:
         # 反而干扰默认解析并触发任务图 StackOverflowError
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Locate APK
+      - name: Locate & rename APK
         id: apk
         run: |
           APK_PATH=$(find build/outputs/apk -name "*.apk" | head -1)
-          echo "path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "找到 APK: $APK_PATH"
-          ls -lh "$APK_PATH"
+          OUT_NAME="${{ steps.ctx.outputs.apk_name }}"
+          mkdir -p dist
+          cp "$APK_PATH" "dist/$OUT_NAME"
+          echo "path=dist/$OUT_NAME" >> $GITHUB_OUTPUT
+          echo "原 APK: $APK_PATH"
+          echo "发布名: dist/$OUT_NAME"
+          ls -lh dist/
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: agent-toolbox-debug-${{ github.sha }}
-          path: build/outputs/apk/**/*.apk
+          name: agent-toolbox-${{ steps.ctx.outputs.release_kind }}-${{ github.sha }}
+          path: dist/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="dist/${{ steps.ctx.outputs.apk_name }}"
+          TAG="${{ steps.ctx.outputs.release_tag }}"
+          TITLE="${{ steps.ctx.outputs.release_title }}"
+          if [[ "${{ steps.ctx.outputs.release_kind }}" == "main" ]]; then
+            # 推 main：滚动 latest 预发布。先清掉旧的 latest Release 和 tag，始终只保留一个
+            echo "=== 删除旧 latest Release + tag（若存在）==="
+            gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+            NOTES="自动构建（commit ${{ steps.ctx.outputs.short_sha }}）。
+          发布于 $(date -u '+%Y-%m-%d %H:%M UTC')。
+          这是最新的开发版，每次推送 main 自动更新覆盖。"
+            gh release create latest "$APK" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --prerelease
+            echo "=== 已发布滚动 latest 预发布版 ==="
+          else
+            # 打 tag：正式版 Release，自动生成 changelog
+            NOTES="## ${{ steps.ctx.outputs.tag }}
+          versionName=${{ steps.ctx.outputs.version }} versionCode=${{ steps.ctx.outputs.version_code }}
+          （版本号已自动同步进 APK）"
+            gh release create "$TAG" "$APK" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --generate-notes
+            echo "=== 已发布正式版 Release: $TAG ==="
+          fi
