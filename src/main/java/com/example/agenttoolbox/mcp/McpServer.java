@@ -61,6 +61,18 @@ public class McpServer {
     private ExecutorService sseThreadPool;
     private static volatile boolean serverRunning = false;
 
+    // ask 工具等待机制：conversationId → AskWaiter
+    // ask 执行后服务端阻塞等待用户回答，用户通过 /api/chat/answer 提交答案后唤醒
+    private static final java.util.concurrent.ConcurrentHashMap<Long, AskWaiter> pendingAsks =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** ask 等待器：持有 latch 和用户答案 */
+    private static class AskWaiter {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<String> answerRef = new AtomicReference<>(null);
+        void setAnswer(String answer) { answerRef.set(answer); latch.countDown(); }
+    }
+
     public static boolean isServiceRunning() {
         return serverRunning;
     }
@@ -1490,6 +1502,44 @@ public class McpServer {
                                 toolIsError = toolResult.startsWith("错误") || toolResult.startsWith("工具执行失败");
                             }
 
+                            // ask 工具特殊处理：不把 __ASK_MULTI__ 返回给 LLM，
+                            // 而是阻塞等待用户回答，再把答案作为工具结果返回给 LLM
+                            // 这样 LLM 不会生成"请回答上述问题"的多余文本，任务真正暂停在 ask 这一步
+                            if ("ask".equals(toolNameForLog) && !toolIsError) {
+                                log("[ASK] ask 工具执行完成，阻塞等待用户回答 (conversationId=" + conversationId + ")");
+                                AskWaiter waiter = new AskWaiter();
+                                pendingAsks.put(conversationId, waiter);
+
+                                // SSE 推送 ask 事件给前端（含 conversationId，前端回答时带回）
+                                try {
+                                    JSONObject askEvent = new JSONObject();
+                                    askEvent.put("conversationId", conversationId);
+                                    askEvent.put("questions", toolResult);
+                                    writeEventChunk(out, "ask", askEvent.toString());
+                                    flushWriteHandler();
+                                } catch (Exception e) {
+                                    log("[ASK] 推送 ask 事件失败: " + e.getMessage());
+                                }
+
+                                // 阻塞等待用户回答（超时 5 分钟）
+                                boolean answered = false;
+                                try {
+                                    answered = waiter.latch.await(5, TimeUnit.MINUTES);
+                                } catch (InterruptedException e) {
+                                    log("[ASK] 等待被中断");
+                                }
+                                pendingAsks.remove(conversationId);
+
+                                if (answered && waiter.answerRef.get() != null) {
+                                    toolResult = "用户回答:\n" + waiter.answerRef.get();
+                                    log("[ASK] 收到用户回答，继续对话");
+                                } else {
+                                    toolResult = "用户未在超时时间内回答，请直接回复用户说明情况";
+                                    toolIsError = true;
+                                    log("[ASK] 用户回答超时");
+                                }
+                            }
+
                             // 更新会话中间状态
                             if (cachedSession != null && !toolIsError) {
                                 updateSessionState(cachedSession, toolNameForLog, replyJson.optJSONObject("params"), toolResult);
@@ -1664,6 +1714,28 @@ public class McpServer {
                         .put("connected", registered)
                         .put("message", registered ? "DeepSeek 已连接" : "DeepSeek 未连接")
                         .toString();
+                } else if ("/api/chat/answer".equals(action)) {
+                    // ask 工具的用户回答接口：前端提交答案，唤醒阻塞的 ask 等待
+                    long convId = body.optLong("conversationId", -1);
+                    String answer = body.optString("answer", "");
+                    if (convId > 0 && !answer.isEmpty()) {
+                        AskWaiter waiter = pendingAsks.get(convId);
+                        if (waiter != null) {
+                            waiter.setAnswer(answer);
+                            responseBody = new JSONObject().put("success", true).toString();
+                            log("[ASK] 收到用户回答 (conversationId=" + convId + ")");
+                        } else {
+                            responseBody = new JSONObject()
+                                .put("success", false)
+                                .put("error", "没有等待中的提问")
+                                .toString();
+                        }
+                    } else {
+                        responseBody = new JSONObject()
+                            .put("success", false)
+                            .put("error", "缺少 conversationId 或 answer")
+                            .toString();
+                    }
                 } else {
                     responseBody = new JSONObject()
                         .put("success", false)

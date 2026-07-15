@@ -2539,14 +2539,37 @@
                         var st = window[sk];
                         var qs = cardEl.__qList;
                         if (!st || st.idx >= qs.length) {
-                            // 全部答完，发送
+                            // 全部答完，提交答案到 /api/chat/answer（唤醒服务端阻塞的 ask 线程）
+                            // 不再新开 /api/chat/send，否则会打断当前正在阻塞等待的 ask 流程
                             var all = [];
                             for (var ai = 0; ai < st.answers.length; ai++) {
                                 all.push((ai + 1) + '. ' + st.answers[ai]);
                             }
-                            chatInput.value = all.join('\n');
-                            sendMessage();
-                            cardEl.innerHTML = '<div style="font-size:14px; color:#92400e; padding:8px;">✅ 已提交全部回答</div>';
+                            var answerText = all.join('\n');
+                            // cardEl 是内部 bubbleEl，data-ask-conv 设在外层 msgEl 上，向上查找
+                            var convHolder = cardEl.closest ? cardEl.closest('[data-ask-conv]') : null;
+                            var convId = convHolder ? convHolder.getAttribute('data-ask-conv') : null;
+                            if (convId) {
+                                cardEl.innerHTML = '<div style="font-size:14px; color:#92400e; padding:8px;">⏳ 正在提交回答…</div>';
+                                fetch(getServerUrl() + '/api/chat/answer', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ conversationId: Number(convId), answer: answerText })
+                                }).then(function(r) { return r.json(); }).then(function(d) {
+                                    if (d && d.success) {
+                                        cardEl.innerHTML = '<div style="font-size:14px; color:#92400e; padding:8px;">✅ 已提交全部回答</div>';
+                                    } else {
+                                        cardEl.innerHTML = '<div style="font-size:14px; color:#b91c1c; padding:8px;">❌ ' + escapeHtml((d && d.error) ? d.error : '提交失败') + '</div>';
+                                    }
+                                }).catch(function(e) {
+                                    cardEl.innerHTML = '<div style="font-size:14px; color:#b91c1c; padding:8px;">❌ 提交失败: ' + escapeHtml(String(e)) + '</div>';
+                                });
+                            } else {
+                                // 兜底：没有 conversationId（异常情况），退回旧行为
+                                chatInput.value = answerText;
+                                sendMessage();
+                                cardEl.innerHTML = '<div style="font-size:14px; color:#92400e; padding:8px;">✅ 已提交全部回答</div>';
+                            }
                             return;
                         }
                         var cur = qs[st.idx];
@@ -3168,6 +3191,33 @@
                         // 计划事件：更新侧边栏待办面板
                         if (obj) {
                             renderPlan(obj);
+                        }
+                    } else if (eventName === 'ask') {
+                        // ask 事件：服务端阻塞等待用户回答
+                        // 渲染 ask 卡片，用户答完后调 /api/chat/answer（不再新开 /api/chat/send）
+                        if (obj && obj.questions) {
+                            const askConvId = obj.conversationId;
+                            const cardEl = addToolResultCard('ask', obj.questions, false);
+                            if (cardEl) {
+                                // 标记卡片所属的 conversationId
+                                cardEl.setAttribute('data-ask-conv', askConvId);
+                                let hostMsg = null;
+                                let node = activeBubbleEl;
+                                while (node && node !== chatMessages) {
+                                    if (node.classList && node.classList.contains('message') && node.classList.contains('server')) {
+                                        hostMsg = node;
+                                        break;
+                                    }
+                                    node = node.parentNode;
+                                }
+                                if (hostMsg && hostMsg.parentNode === chatMessages) {
+                                    hostMsg.parentNode.insertBefore(cardEl, hostMsg.nextSibling);
+                                } else {
+                                    chatMessages.appendChild(cardEl);
+                                }
+                                cardEl.style.marginBottom = '16px';
+                            }
+                            setState('等待用户回答');
                         }
                     } else if (eventName === 'retrying') {
                         setState('重试中');
