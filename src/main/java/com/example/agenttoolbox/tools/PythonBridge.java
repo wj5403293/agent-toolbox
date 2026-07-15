@@ -252,18 +252,32 @@ public class PythonBridge {
         }
     }
 
+    /**
+     * 判断 asset 子项是文件还是目录。
+     * Android AssetManager.list() 对目录返回文件名数组（可能为空），
+     * 对文件/不存在返回 null，但行为在不同版本有差异。
+     * 用扩展名辅助判断更可靠：stdlib 中文件都有扩展名（.py/.so/.pyc），
+     * 目录无扩展名。空目录（list 返回空数组）也要当目录 mkdirs。
+     */
+    private static boolean isAssetDir(Context context, String childPath, String name) {
+        // 有扩展名 → 文件
+        int dot = name.lastIndexOf('.');
+        if (dot > 0 && dot < name.length() - 1) return false;
+        // 无扩展名 → 目录（含空目录）
+        return true;
+    }
+
     private static void extractAssetDir(Context context, String assetPath, File targetDir)
             throws Exception {
         String[] names = context.getAssets().list(assetPath);
-        if (names == null || names.length == 0) {
+        if (names == null) {
             extractAssetFile(context, assetPath, targetDir);
             return;
         }
         if (!targetDir.exists()) targetDir.mkdirs();
         for (String name : names) {
             String childPath = assetPath + "/" + name;
-            String[] childNames = context.getAssets().list(childPath);
-            if (childNames != null && childNames.length > 0) {
+            if (isAssetDir(context, childPath, name)) {
                 File childDir = new File(targetDir, name);
                 childDir.mkdirs();
                 extractAssetDirRecursive(context, childPath, childDir);
@@ -279,8 +293,7 @@ public class PythonBridge {
         if (names == null) return;
         for (String name : names) {
             String childPath = assetPath + "/" + name;
-            String[] childNames = context.getAssets().list(childPath);
-            if (childNames != null && childNames.length > 0) {
+            if (isAssetDir(context, childPath, name)) {
                 File childDir = new File(targetDir, name);
                 childDir.mkdirs();
                 extractAssetDirRecursive(context, childPath, childDir);
