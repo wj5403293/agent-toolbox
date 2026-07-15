@@ -405,10 +405,14 @@ public class DeepSeekActivity extends Activity {
 
     /**
      * 应用 MCP 工具箱透明度。
-     * a = 1.0：完全不透明（默认，mcpWebView 遮住底层 DeepSeek）
-     * a < 1.0：mcpWebView 半透明 + Dialog 窗口透明，可穿透看到底层 DeepSeek 网页
+     * a = 1.0：mcpWebView 不透明 + mcpOverlay 背景接近不透明黑，遮住底层 DeepSeek
+     * a < 1.0：mcpWebView 半透明 + mcpOverlay 背景按比例衰减，可穿透看到底层 DeepSeek 网页
      *
-     * 同步调整三处：mcpWebView 自身 alpha、mcpOverlay 遮罩背景、Dialog 窗口背景。
+     * 透明度全部由 mcpWebView.setAlpha + mcpOverlay 背景控制。
+     * Dialog 窗口背景在创建时即设为全透明（见 openMcpToolbox），使窗口 Surface 支持透明，
+     * 此处不再动态修改窗口背景——因为窗口 Surface 的透明性在添加到 WindowManager 时
+     * 一次性确定，show 之后改背景 drawable 无法让不透明 Surface 变透明（会表现为
+     * "必须先关闭再打开才生效"的 bug）。
      */
     private void applyMcpAlpha(float a) {
         sMcpAlpha = a;
@@ -416,18 +420,9 @@ public class DeepSeekActivity extends Activity {
             mcpWebView.setAlpha(a);
         }
         // mcpOverlay 遮罩背景：默认 #E6000000（0.9 黑），按 a 比例衰减
+        // a=1.0 → 0xE5000000（接近不透明，挡住底层）；a=0.5 → 0x72000000（半透明）
         int bgAlpha = (int) (0.9f * a * 255);
         mcpOverlay.setBackgroundColor((bgAlpha << 24) & 0xFF000000);
-        // Dialog 窗口背景：a<1 时必须透明，否则窗口自身黑底会挡住底层 Activity
-        if (mcpDialog != null && mcpDialog.getWindow() != null) {
-            if (a >= 0.999f) {
-                mcpDialog.getWindow().setBackgroundDrawable(
-                        new android.graphics.drawable.ColorDrawable(0xFF000000));
-            } else {
-                mcpDialog.getWindow().setBackgroundDrawable(
-                        new android.graphics.drawable.ColorDrawable(0x00000000));
-            }
-        }
     }
 
     /** dp 转 px */
@@ -440,10 +435,13 @@ public class DeepSeekActivity extends Activity {
         if (mcpDialog == null) {
             mcpDialog = new android.app.Dialog(this);
             mcpDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+            // 窗口背景创建时即设为全透明，使窗口 Surface 一开始就支持透明。
+            // 窗口 Surface 的透明性在添加到 WindowManager 时一次性确定，
+            // 若创建时设为不透明，show 后再改背景无法让 Surface 变透明。
+            // 遮罩完全由 mcpOverlay 背景控制（applyMcpAlpha 按透明度衰减）。
             mcpDialog.getWindow().setBackgroundDrawable(
-                new android.graphics.drawable.ColorDrawable(0xFF000000));
-            // 关闭窗口默认 dim，遮罩完全由 mcpOverlay 背景控制，
-            // 这样调节透明度时才能真正穿透显示底层 DeepSeek 网页
+                new android.graphics.drawable.ColorDrawable(0x00000000));
+            // 关闭窗口默认 dim，否则系统 dim 层会挡住底层 DeepSeek
             mcpDialog.getWindow().clearFlags(
                 android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             // 将 mcpOverlay 从 Activity 布局移到 Dialog
@@ -472,7 +470,7 @@ public class DeepSeekActivity extends Activity {
             bridge.markMcpWebViewLoaded();
         }
         mcpDialog.show();
-        // 恢复透明度：Dialog 重建后窗口背景被重置为不透明，需重新应用上次设置
+        // 应用透明度：mcpWebView/mcpOverlay 在 Activity 重建后是新实例，需重新应用 alpha 和遮罩背景
         applyMcpAlpha(sMcpAlpha);
     }
 
