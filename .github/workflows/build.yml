@@ -25,9 +25,14 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Setup Gradle 7.5.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '7.5.1'
+        # setup-gradle action 用 runner 预装的 /usr/bin/gradle(8.x) 去 provision
+        # 7.5.1 时静默失败，改用直接下载 distribution 的方式，最可控
+        run: |
+          cd /tmp
+          curl -sL --retry 3 https://services.gradle.org/distributions/gradle-7.5.1-bin.zip -o gradle-7.5.1-bin.zip
+          unzip -q gradle-7.5.1-bin.zip -d /opt
+          echo "/opt/gradle-7.5.1/bin" >> $GITHUB_PATH
+          /opt/gradle-7.5.1/bin/gradle --version
 
       - name: Patch build files for CI
         # 项目用 AIDE Pro 在安卓上构建，build.gradle / gradle.properties
