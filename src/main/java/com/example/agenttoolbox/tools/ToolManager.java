@@ -45,7 +45,7 @@ public class ToolManager {
         registerTool(new FileWriteTool());
         registerTool(new FileListTool());
         registerTool(new FileSearchTool());
-        registerTool(new ShellTool());
+        registerTool(new ShellTool(context));
         registerTool(new CmdTool());
         registerTool(new PythonTool(context));
         registerTool(new ShTool());

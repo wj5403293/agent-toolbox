@@ -1,5 +1,6 @@
 package com.example.agenttoolbox.tools;
 
+import android.content.Context;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -14,6 +15,14 @@ import org.json.JSONObject;
  * 4. 输出格式精简
  */
 public class ShellTool implements Tool {
+
+    private Context context;
+
+    public ShellTool() {}
+
+    public ShellTool(Context context) {
+        this.context = context;
+    }
 
     @Override
     public String getName() {
@@ -139,12 +148,25 @@ public class ShellTool implements Tool {
                     "或通过 python 工具（tools/call）执行多行代码。\n";
             }
             
-            String result = PythonBridge.exec(code);
+            String result = execPythonCode(code);
             sb.append(result);
         } catch (Exception e) {
             sb.append("错误: ").append(e.getMessage());
         }
-        
+
         return sb.toString();
+    }
+
+    /**
+     * 执行 Python 代码前先确保 PythonBridge 已初始化。
+     * shell 截获的 python/pip 命令必须先 init，否则 exec 返回
+     * "Python 未初始化"（jniInitOk 保持 false，jniInitRetCode 为默认 0）。
+     */
+    private String execPythonCode(String code) throws Exception {
+        if (context == null) {
+            return "[错误] ShellTool 未注入 Context，无法初始化 Python，请重启应用";
+        }
+        PythonBridge.init(context);
+        return PythonBridge.exec(code);
     }
 }
