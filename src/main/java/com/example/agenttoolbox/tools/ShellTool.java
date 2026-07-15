@@ -82,6 +82,11 @@ public class ShellTool implements Tool {
         if (trimmed.startsWith("pip ") || trimmed.equals("pip")) {
             return executePython("python -m " + trimmed, timeout);
         }
+        // 拦截 which/command -v 查询 python/pip：嵌入式 Python 不在系统 PATH，
+        // which 必然找不到，直接返回内嵌环境状态避免误导
+        if (isPythonPathQuery(trimmed)) {
+            return reportEmbeddedPython(command);
+        }
 
         ProcessRunner.Result result = ProcessRunner.execShell(command, timeout);
 
@@ -168,5 +173,33 @@ public class ShellTool implements Tool {
         }
         PythonBridge.init(context);
         return PythonBridge.exec(code);
+    }
+
+    /**
+     * 判断是否为查询 python/pip 路径的命令（which / command -v / type）
+     */
+    private boolean isPythonPathQuery(String cmd) {
+        // 匹配 "which python", "which python3", "which pip",
+        // "command -v python", "type python" 等
+        return (cmd.startsWith("which ") || cmd.startsWith("command -v ") || cmd.startsWith("type "))
+            && (cmd.contains("python") || cmd.contains("pip"));
+    }
+
+    /**
+     * 对 which python 等查询返回内嵌 Python 环境说明，
+     * 避免系统 PATH 找不到 python 造成"未安装"的误解。
+     */
+    private String reportEmbeddedPython(String originalCmd) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("$ ").append(originalCmd).append("\n");
+        sb.append("退出码: 0\n\n");
+        sb.append("说明: 本应用使用 JNI 内嵌 Python（Python 3.14.6），")
+          .append("没有独立的 python 可执行文件，不在系统 PATH 中，")
+          .append("所以 which/command -v 找不到。\n\n");
+        sb.append("状态: ").append(PythonBridge.getStatus()).append("\n");
+        sb.append("用法: \n")
+          .append("  - 直接用 python 工具（tools/call name=python）执行代码\n")
+          .append("  - shell 里用 `python -c \"代码\"` 或 `pip install 包名` 会被桥接到内嵌环境\n");
+        return sb.toString();
     }
 }
