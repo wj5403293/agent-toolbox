@@ -2377,20 +2377,23 @@
             return { text: text, isJson: false };
         }
 
+        // 工具图标映射表（全局共用，避免多处重复定义）
+        const TOOL_ICON_MAP = {
+            'gm_root_status': '🔰', 'gm_process_list': '📋', 'gm_attach_process': '🔗',
+            'gm_memory_search': '🔍', 'gm_memory_read': '👁', 'gm_memory_write': '✏',
+            'gm_memory_freeze': '❄', 'gm_lua_execute': '📜', 'aob_search': '🔎',
+            'file_list': '📁', 'file_read': '📄', 'file_write': '📝',
+            'shell': '💻', 'cmd': '⚡', 'python': '🐍', 'http_request': '🌐',
+            'web': '🌍', 'math_calculator': '🔢', 'ask': '❓', 'skill_read': '📖'
+        };
+        function getToolIcon(toolName) { return TOOL_ICON_MAP[toolName] || '🔧'; }
+
         /**
          * 生成工具调用状态的友好提示
          */
         function formatToolCallStatus(toolName) {
             const toolLabel = toolName || '未知工具';
-            const iconMap = {
-                'gm_root_status': '🔰', 'gm_process_list': '📋', 'gm_attach_process': '🔗',
-                'gm_memory_search': '🔍', 'gm_memory_read': '👁', 'gm_memory_write': '✏',
-                'gm_memory_freeze': '❄', 'gm_lua_execute': '📜', 'aob_search': '🔎',
-                'file_list': '📁', 'file_read': '📄', 'file_write': '📝',
-                'shell': '💻', 'cmd': '⚡', 'python': '🐍', 'http_request': '🌐',
-                'web': '🌍', 'math_calculator': '🔢', 'ask': '❓'
-            };
-            const icon = iconMap[toolName] || '🔧';
+            const icon = getToolIcon(toolName);
             return icon + ' 正在调用工具：' + toolLabel + '（请稍候…）';
         }
 
@@ -2407,7 +2410,9 @@
                 // 工具结果卡片与下方文字 bubble 之间留出间距（margin-bottom），
                 // 否则两者紧贴无分隔，影响阅读；margin-top 与上方 label 保持间距
                 resultDiv.style.cssText = 'margin-top: 8px; margin-bottom: 10px; padding: 10px 14px; border-radius: 12px; font-size: 13px; background: ' + (isError ? '#fef2f2' : '#f8fafc') + '; border: 1px solid ' + (isError ? '#fecaca' : '#e2e8f0') + '; color: ' + (isError ? '#b91c1c' : '#475569') + ';';
-                resultDiv.innerHTML = '<div style="font-weight:600; margin-bottom:4px;">🔧 ' + escapeHtml(toolName) + '</div><div class="md-body" style="white-space:pre-wrap;">' + renderMarkdown(result) + '</div>';
+                // 带工具图标的 label 徽章，与独立工具消息风格一致
+                const toolIcon = getToolIcon(toolName);
+                resultDiv.innerHTML = '<div class="message-label" style="margin-bottom:6px;"><span class="method-badge method-response">' + toolIcon + ' ' + escapeHtml(toolName) + '</span> <span class="text-muted" style="font-size:12px;">工具结果</span></div><div class="md-body" style="white-space:pre-wrap;">' + renderMarkdown(result) + '</div>';
                 const bubbleEl = contentEl.querySelector('.message-bubble');
                 if (bubbleEl) contentEl.insertBefore(resultDiv, bubbleEl);
                 else contentEl.appendChild(resultDiv);
@@ -2422,15 +2427,7 @@
 
             const labelEl = document.createElement('div');
             labelEl.className = 'message-label';
-            const iconMap = {
-                'file_write': '📝', 'file_read': '📄', 'file_list': '📁',
-                'gm_root_status': '🔰', 'gm_process_list': '📋', 'gm_attach_process': '🔗',
-                'gm_memory_search': '🔍', 'gm_memory_read': '👁', 'gm_memory_write': '✏',
-                'gm_memory_freeze': '❄', 'gm_lua_execute': '📜', 'aob_search': '🔎',
-                'shell': '💻', 'cmd': '⚡', 'python': '🐍', 'http_request': '🌐',
-                'web': '🌍', 'math_calculator': '🔢', 'ask': '❓'
-            };
-            const icon = iconMap[toolName] || '🔧';
+            const icon = getToolIcon(toolName);
             labelEl.innerHTML = '<span class="method-badge method-response">' + icon + ' ' + toolName + '</span> <span class="text-muted" style="font-size:12px;">工具结果</span>';
 
             const bubbleEl = document.createElement('div');
