@@ -36,10 +36,10 @@ jobs:
 
       - name: Patch build files for CI
         # 项目用 AIDE Pro 在安卓上构建，build.gradle / gradle.properties
-        # 硬编码了安卓设备路径，CI 上不存在，需临时移除（不影响仓库源文件）
+        # 硬编码了安卓设备路径，CI 上不存在，需临时改写（不影响仓库源文件）
         run: |
-          echo "=== 移除 build.gradle 里的硬编码 buildDir ==="
-          sed -i '/^buildDir = new File/d' build.gradle
+          echo "=== 替换 build.gradle 里的硬编码 buildDir 为项目本地路径 ==="
+          sed -i "s|^buildDir = new File.*|buildDir = file('build')|" build.gradle
           echo "=== 移除 gradle.properties 里的安卓硬编码路径 ==="
           sed -i '/org.gradle.project.buildDir=/d' gradle.properties
           sed -i '/org.gradle.java.home=/d' gradle.properties
@@ -49,8 +49,14 @@ jobs:
           echo "--- gradle.properties ---"
           cat gradle.properties
 
+      - name: Verify buildDir resolution
+        # 打印 Gradle 实际解析的 buildDir，确认不再指向安卓设备路径
+        run: gradle properties --no-daemon --console=plain | grep -i "^buildDir" || true
+
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon -PbuildDir=build --stacktrace
+        # 不用 -PbuildDir，它会被 Gradle 当作覆盖 Project.buildDir 属性的值，
+        # 反而干扰默认解析并触发任务图 StackOverflowError
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Locate APK
         id: apk
