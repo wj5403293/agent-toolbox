@@ -25,8 +25,8 @@ public class PythonBridge {
     private static final String STDLIB_ASSET_DIR = "python/stdlib";
     private static final String PYTHON_DIR_NAME = "python";
     private static final String VERSION_FILE = ".python_version";
-    // v2: 修复 stdlib 提取丢失无扩展名子目录（如 zipfile/_path）的 bug，需重新提取
-    private static final String EXPECTED_VERSION = "3.14.6-official-v2";
+    // v3: 改用 try-open 判断文件/目录，修复无扩展名文件（config-3.14-...）被误判为目录丢失
+    private static final String EXPECTED_VERSION = "3.14.6-official-v3";
 
     private static boolean jniLoaded = false;
     private static boolean jniInitOk = false;
@@ -256,18 +256,21 @@ public class PythonBridge {
     }
 
     /**
-     * 判断 asset 子项是文件还是目录。
-     * Android AssetManager.list() 对目录返回文件名数组（可能为空），
-     * 对文件/不存在返回 null，但行为在不同版本有差异。
-     * 用扩展名辅助判断更可靠：stdlib 中文件都有扩展名（.py/.so/.pyc），
-     * 目录无扩展名。空目录（list 返回空数组）也要当目录 mkdirs。
+     * 判断 asset 路径是文件还是目录：尝试 open，成功是文件，IOException 是目录。
+     * 这是最可靠的方式，不依赖 list() 返回值约定或扩展名猜测
+     * （stdlib 里有 config-3.14-aarch64-linux-android 这类无扩展名文件，
+     * 用扩展名判断会误判为目录导致丢失）。
      */
-    private static boolean isAssetDir(Context context, String childPath, String name) {
-        // 有扩展名 → 文件
-        int dot = name.lastIndexOf('.');
-        if (dot > 0 && dot < name.length() - 1) return false;
-        // 无扩展名 → 目录（含空目录）
-        return true;
+    private static boolean isAssetFile(Context context, String childPath) {
+        InputStream is = null;
+        try {
+            is = context.getAssets().open(childPath);
+            return true;  // 能 open → 文件
+        } catch (IOException e) {
+            return false;  // 不能 open → 目录
+        } finally {
+            if (is != null) try { is.close(); } catch (IOException ignored) {}
+        }
     }
 
     private static void extractAssetDir(Context context, String assetPath, File targetDir)
@@ -280,12 +283,12 @@ public class PythonBridge {
         if (!targetDir.exists()) targetDir.mkdirs();
         for (String name : names) {
             String childPath = assetPath + "/" + name;
-            if (isAssetDir(context, childPath, name)) {
+            if (isAssetFile(context, childPath)) {
+                extractAssetFile(context, childPath, targetDir);
+            } else {
                 File childDir = new File(targetDir, name);
                 childDir.mkdirs();
                 extractAssetDirRecursive(context, childPath, childDir);
-            } else {
-                extractAssetFile(context, childPath, targetDir);
             }
         }
     }
@@ -296,12 +299,12 @@ public class PythonBridge {
         if (names == null) return;
         for (String name : names) {
             String childPath = assetPath + "/" + name;
-            if (isAssetDir(context, childPath, name)) {
+            if (isAssetFile(context, childPath)) {
+                extractAssetFile(context, childPath, targetDir);
+            } else {
                 File childDir = new File(targetDir, name);
                 childDir.mkdirs();
                 extractAssetDirRecursive(context, childPath, childDir);
-            } else {
-                extractAssetFile(context, childPath, targetDir);
             }
         }
     }
