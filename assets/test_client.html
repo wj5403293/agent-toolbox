@@ -2578,13 +2578,17 @@
                         var html = '<div style="margin-bottom:10px; font-size:12px; color:#b45309; font-weight:500;">问题 ' + idx + '/' + total + '</div>';
                         html += '<div style="font-size:14px; font-weight:600; color:#92400e; margin-bottom:10px;">' + escapeHtml(cur.q) + '</div>';
                         if (cur.opts && cur.opts.length > 0) {
-                            // 有选项时只显示选项按钮，不再附带"提交"按钮和输入框
-                            // （LLM 已在 options 里提供所有选项，额外输入框会造成语义混淆）
+                            // 有选项时显示选项按钮 + 输入框 + 提交按钮
+                            // （选项覆盖常见情况，输入框供自定义回答，提交按钮提交输入框内容）
                             html += '<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">';
                             for (var oi = 0; oi < cur.opts.length; oi++) {
                                 var ov = escapeHtml(cur.opts[oi]);
                                 html += '<button type="button" class="ask-opt" data-val="' + ov + '" style="text-align:left; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + (oi+1) + '. ' + ov + '</button>';
                             }
+                            html += '</div>';
+                            html += '<div style="display:flex; gap:6px; align-items:center;">';
+                            html += '<button type="button" class="ask-submit" style="flex-shrink:0; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fffbeb; color:#92400e; font-size:13px; cursor:pointer;">提交</button>';
+                            html += '<input class="ask-input" type="text" placeholder="输入自定义回答…" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #fde68a; font-size:13px; outline:none; background:#fff;">';
                             html += '</div>';
                         } else {
                             // 无选项时显示输入框（回车提交）
@@ -2598,6 +2602,25 @@
                                 window[sk].answers.push(ans);
                                 window[sk].idx++;
                                 renderAskCard(cardEl);
+                            };
+                        });
+                        // 提交按钮：提交输入框内容（输入框为空时红框提示）
+                        cardEl.querySelectorAll('.ask-submit').forEach(function(b) {
+                            b.onclick = function() {
+                                var inp = cardEl.querySelector('.ask-input');
+                                if (inp && inp.value.trim()) {
+                                    window[sk].answers.push(inp.value.trim());
+                                    window[sk].idx++;
+                                    renderAskCard(cardEl);
+                                } else if (inp) {
+                                    inp.focus();
+                                    inp.style.borderColor = '#f87171';
+                                    inp.placeholder = '请先输入回答，再点提交';
+                                    setTimeout(function() {
+                                        inp.style.borderColor = '#fde68a';
+                                        inp.placeholder = '输入自定义回答…';
+                                    }, 2000);
+                                }
                             };
                         });
                         cardEl.querySelectorAll('.ask-input').forEach(function(inp) {
@@ -3185,13 +3208,25 @@
                         // 渲染 ask 卡片，用户答完后调 /api/chat/answer（不再新开 /api/chat/send）
                         if (obj && obj.questions) {
                             const askConvId = obj.conversationId;
-                            // ask 卡片作为独立消息留在 chatMessages 末尾（当前进行时）。
-                            // 用户答完后服务端继续推送，round 切换会创建新 AI 消息 append 到
-                            // ask 卡片之后（下方），形成正确时序：
-                            //   AI 提问消息 → ask 卡片 → AI 后续回复
                             const cardEl = addToolResultCard('ask', obj.questions, false);
                             if (cardEl) {
                                 cardEl.setAttribute('data-ask-conv', askConvId);
+                                // 把 ask 卡片移到触发提问的 AI 消息（hostMsg）之后，
+                                // 保持对话流先后顺序：AI 提问消息 → ask 卡片 → 后续回复。
+                                // 不能留在 chatMessages 末尾，否则中间的工具结果/状态
+                                // 会隔断 ask 卡片与其提问消息，显得"夺舍"。
+                                let hostMsg = null;
+                                let node = activeBubbleEl;
+                                while (node && node !== chatMessages) {
+                                    if (node.classList && node.classList.contains('message') && node.classList.contains('server')) {
+                                        hostMsg = node;
+                                        break;
+                                    }
+                                    node = node.parentNode;
+                                }
+                                if (hostMsg && hostMsg.parentNode) {
+                                    hostMsg.parentNode.insertBefore(cardEl, hostMsg.nextSibling);
+                                }
                             }
                             setState('等待用户回答');
                         }
