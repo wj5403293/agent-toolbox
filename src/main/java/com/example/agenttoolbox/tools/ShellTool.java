@@ -97,7 +97,10 @@ public class ShellTool implements Tool {
             return reportEmbeddedGit(command);
         }
 
-        ProcessRunner.Result result = ProcessRunner.execShell(command, timeout);
+        // 对非拦截的 shell 命令，注入 git 函数定义，让复合命令中的 git 调用也能工作
+        // 例如 "cd /dir && git status" 中的 git 会被解析为函数，调用 nativeLibraryDir/libgit.so
+        String wrappedCommand = wrapCommandWithGitFunction(command);
+        ProcessRunner.Result result = ProcessRunner.execShell(wrappedCommand, timeout);
 
         StringBuilder sb = new StringBuilder();
         sb.append("$ ").append(command).append("\n");
@@ -123,6 +126,25 @@ public class ShellTool implements Tool {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * 在 shell 命令前注入 git 函数定义，让复合命令中的 git 调用
+     * （如 "cd /dir && git status"）也能使用内嵌静态 git 二进制。
+     * 函数定义: git() { /path/to/libgit.so "$@"; }
+     * 如果内嵌 git 不可用，返回原命令。
+     */
+    private String wrapCommandWithGitFunction(String command) {
+        if (context == null) return command;
+        try {
+            String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            java.io.File libGit = new java.io.File(nativeLibDir, "libgit.so");
+            if (libGit.exists() && libGit.canExecute()) {
+                // 注入 git 函数 + pip/python 别名（复合命令中也可能用到）
+                return "git() { " + libGit.getAbsolutePath() + " \"$@\"; }; " + command;
+            }
+        } catch (Exception ignored) {}
+        return command;
     }
 
     /**

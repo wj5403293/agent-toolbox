@@ -653,7 +653,7 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.4.5（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.6（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
 - **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB，以 libgit.so 打包)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
@@ -664,6 +664,11 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.6 — 复合 shell 命令中的 git 调用支持**
+- 修复 `export ... && git clone ...` 等复合命令中 `git` 报 `inaccessible or not found`（退出码 127）
+- 根因：ShellTool 只拦截 `git` 开头的命令，复合命令走普通 `sh -c`，PATH 里没有 `git`
+- 修复：执行普通 shell 命令前注入 shell 函数 `git() { libgit.so "$@"; }`，让复合命令中的 `git` 调用也能使用内嵌静态二进制
 
 **v2.4.5 — 修复 SELinux 导致 git 二进制不可执行**
 - 根因：`filesDir/git_bin` 的 SELinux 标记为 `app_data_file`，Android 禁止 execve，即使 chmod 755 也报退出码 126 Permission denied
