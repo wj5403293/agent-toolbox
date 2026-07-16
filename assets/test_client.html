@@ -2860,8 +2860,9 @@
             }
 
             setSessionStatus('继续生成中…');
+            var stateLabel = contentEl.querySelector('.message-label');
             var setState = function(t) {
-                var s = document.getElementById('dsStreamState');
+                var s = stateLabel ? stateLabel.querySelector('.ds-stream-state') : null;
                 if (s) s.textContent = t;
             };
 
@@ -3001,7 +3002,7 @@
 
             const labelEl = document.createElement('div');
             labelEl.className = 'message-label';
-            labelEl.innerHTML = '<span class="method-badge method-response">DeepSeek</span> <span class="text-muted" style="font-size:12px; font-weight:400;" id="dsStreamState">流式</span>';
+            labelEl.innerHTML = '<span class="method-badge method-response">DeepSeek</span> <span class="text-muted ds-stream-state" style="font-size:12px; font-weight:400;">流式</span>';
 
             const contentEl = document.createElement('div');
             contentEl.className = 'message-content';
@@ -3016,7 +3017,7 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
             let setState = (t) => {
-                const s = document.getElementById('dsStreamState');
+                const s = labelEl.querySelector('.ds-stream-state');
                 if (s) s.textContent = t;
             };
 
@@ -3126,36 +3127,40 @@
 
                             // 轮次切换时：保留旧 bubble 内容，创建新 bubble 用于本轮
                             if (round !== currentRound) {
+                                const isFirstRound = currentRound === 0;
                                 currentRound = round;
                                 lastLen = 0;
                                 streamContent = '';
                                 hasToolCallDetected = false;
-                                // 创建新轮次的 AI 消息条（与 sendToDeepSeek 初始创建的结构一致）
-                                const newBubble = document.createElement('div');
-                                newBubble.className = 'message-bubble';
-                                newBubble.style.whiteSpace = 'pre-wrap';
-                                newBubble.textContent = '…';
-                                const newLabel = document.createElement('div');
-                                newLabel.className = 'message-label';
-                                newLabel.innerHTML = '<span class="method-badge method-response">DeepSeek</span> <span class="text-muted" style="font-size:12px; font-weight:400;" id="dsStreamState">流式</span>';
-                                const newContent = document.createElement('div');
-                                newContent.className = 'message-content';
-                                newContent.appendChild(newLabel);
-                                newContent.appendChild(newBubble);
-                                const newMsg = document.createElement('div');
-                                newMsg.className = 'message server';
-                                newMsg.innerHTML = '<div class="message-avatar">AI</div>';
-                                newMsg.appendChild(newContent);
-                                chatMessages.appendChild(newMsg);
-                                // 切换活跃引用到新 bubble（旧 bubble 内容保留不动）
-                                activeBubbleEl = newBubble;
-                                activeContentEl = newContent;
-                                // 更新 setState 指向新 label
-                                setState = (t) => {
-                                    const s = newLabel.querySelector('#dsStreamState');
-                                    if (s) s.textContent = t;
-                                };
-                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                                if (!isFirstRound) {
+                                    // 非首轮：创建新 AI 消息条（首轮复用 sendToDeepSeek 已创建的初始 bubble）
+                                    const newBubble = document.createElement('div');
+                                    newBubble.className = 'message-bubble';
+                                    newBubble.style.whiteSpace = 'pre-wrap';
+                                    newBubble.textContent = '…';
+                                    const newLabel = document.createElement('div');
+                                    newLabel.className = 'message-label';
+                                    newLabel.innerHTML = '<span class="method-badge method-response">DeepSeek</span> <span class="text-muted ds-stream-state" style="font-size:12px; font-weight:400;">流式</span>';
+                                    const newContent = document.createElement('div');
+                                    newContent.className = 'message-content';
+                                    newContent.appendChild(newLabel);
+                                    newContent.appendChild(newBubble);
+                                    const newMsg = document.createElement('div');
+                                    newMsg.className = 'message server';
+                                    newMsg.innerHTML = '<div class="message-avatar">AI</div>';
+                                    newMsg.appendChild(newContent);
+                                    chatMessages.appendChild(newMsg);
+                                    // 切换活跃引用到新 bubble（旧 bubble 内容保留不动）
+                                    activeBubbleEl = newBubble;
+                                    activeContentEl = newContent;
+                                    // 更新 setState 指向新 label
+                                    setState = (t) => {
+                                        const s = newLabel.querySelector('.ds-stream-state');
+                                        if (s) s.textContent = t;
+                                    };
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                }
+                                // 首轮：复用初始 bubble，不创建新消息，避免出现孤立的 "…" 气泡
                             }
 
                             // 使用 tryExtractJsonContent 检测内容和类型
@@ -3219,14 +3224,28 @@
                         // 渲染 ask 卡片，用户答完后调 /api/chat/answer（不再新开 /api/chat/send）
                         if (obj && obj.questions) {
                             const askConvId = obj.conversationId;
-                            // ask 卡片作为独立消息 append 到 chatMessages 末尾。
-                            // 时序由 SSE 事件到达顺序自然决定：LLM 先输出提问文字（chunk），
-                            // 再触发 ask 事件，所以 ask 卡片自然在提问消息之后；
-                            // 用户答完后 round 切换，新 AI 消息 append 到末尾，在 ask 卡片之后。
-                            // 不手动移动位置，避免 activeBubbleEl 指向错误消息导致时序混乱。
+                            // ask 卡片插入到当前活跃 AI 消息之后，确保提问卡片在回复气泡之前。
+                            // 若直接 append 到末尾，当 round 切换新气泡已创建时，ask 卡片会排到回复之后，
+                            // 造成对话流混乱（用户先看到回复，再看到提问卡片）。
                             const cardEl = addToolResultCard('ask', obj.questions, false);
                             if (cardEl) {
                                 cardEl.setAttribute('data-ask-conv', askConvId);
+                                // 找到当前活跃 bubble 所属的 server 消息，将 ask 卡片插到它后面
+                                let hostMsg = null;
+                                let node = activeBubbleEl;
+                                while (node && node !== chatMessages) {
+                                    if (node.classList && node.classList.contains('message') && node.classList.contains('server')) {
+                                        hostMsg = node;
+                                        break;
+                                    }
+                                    node = node.parentNode;
+                                }
+                                if (hostMsg && hostMsg.parentNode) {
+                                    // 只有当 ask 卡片不在 hostMsg 之后时才移动
+                                    if (cardEl !== hostMsg.nextSibling) {
+                                        hostMsg.parentNode.insertBefore(cardEl, hostMsg.nextSibling);
+                                    }
+                                }
                             }
                             setState('等待用户回答');
                         }
