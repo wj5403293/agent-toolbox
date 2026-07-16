@@ -117,6 +117,24 @@ jobs:
         # 反而干扰默认解析并触发任务图 StackOverflowError
         run: gradle assembleDebug --no-daemon --stacktrace
 
+      - name: Verify APK contents
+        # 验证 APK 内 assets 是否完整打包了 pip/_internal
+        # （曾出现设备上 import pip._internal 报 ModuleNotFoundError，
+        #  需确认是 APK 打包缺失还是运行时提取 bug）
+        run: |
+          APK_PATH=$(find build/outputs/apk -name "*.apk" | head -1)
+          echo "=== APK: $APK_PATH ==="
+          echo "--- pip 相关条目数 ---"
+          unzip -l "$APK_PATH" | grep -c "assets/python/stdlib/pip" || true
+          echo "--- pip/_internal 相关条目数 ---"
+          unzip -l "$APK_PATH" | grep -c "pip/_internal" || true
+          echo "--- pip/_internal/__init__.py 是否存在 ---"
+          unzip -l "$APK_PATH" | grep "pip/_internal/__init__.py" || echo "❌ 缺失!"
+          echo "--- pip/_internal/cli/main.py 是否存在 ---"
+          unzip -l "$APK_PATH" | grep "pip/_internal/cli/main.py" || echo "❌ 缺失!"
+          echo "--- os.py 是否存在 ---"
+          unzip -l "$APK_PATH" | grep "lib/python3.14/os.py" || echo "❌ 缺失!"
+
       - name: Locate & rename APK
         id: apk
         run: |
