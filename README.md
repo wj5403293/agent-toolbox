@@ -1,6 +1,6 @@
 # Agent工具箱 - Android MCP 服务端
 
-基于 **AIDE Pro** 开发的安卓端 MCP（Model Context Protocol）服务端应用，完全遵循 JSON-RPC 2.0 协议规范。内置 **Python 3.14.6** 嵌入式运行时、**Lua 引擎**、**内存修改引擎**，通过 DeepSeek 网页版集成为 AI 提供本地工具调用能力。
+基于 **AIDE Pro** 开发的安卓端 MCP（Model Context Protocol）服务端应用，完全遵循 JSON-RPC 2.0 协议规范。内置 **Python 3.14.6** 嵌入式运行时、**Lua 引擎**、**内存修改引擎**、**静态 Git 二进制**，通过 DeepSeek 网页版集成为 AI 提供本地工具调用能力。
 
 ---
 
@@ -61,6 +61,12 @@
 - 信号保护机制：`Py_Initialize` 崩溃不杀进程
 - GIL 安全管理：`PyEval_SaveThread` + `PyGILState_Ensure/Release`
 
+### Git 集成（三层回退）
+- **第一层 — 内嵌静态 git 二进制**：APK 内置 `assets/git/git`（4.2MB，aarch64 静态编译，0 动态依赖），支持完整 git 功能含 HTTPS
+- **第二层 — 系统 git**：搜索 `/system/bin`、`/system/xbin`、Termux 路径等，找到则直接执行
+- **第三层 — dulwich 兜底**：纯 Python Git 实现，首次使用自动 `pip install dulwich`，支持 17 个子命令
+- 在 shell 工具中直接使用 `git` 命令即可，自动选择最优实现
+
 ### 工具集
 
 **内置工具（由 ToolManager 注册）：**
@@ -68,7 +74,7 @@
 | 分类 | 工具名 | 说明 |
 |------|--------|------|
 | **Python** | `python` | 内嵌 Python 3.14 代码执行 |
-| **Shell** | `shell` | Shell 命令执行（内嵌 python/pip 命令自动桥接） |
+| **Shell** | `shell` | Shell 命令执行（内嵌 python/pip/git 命令自动桥接） |
 | | `sh` | sh 命令执行 |
 | | `cmd` | 命令执行（无 root） |
 | **文件** | `file_read` | 文件读取（支持行范围） |
@@ -105,6 +111,7 @@ agent-toolbox/
 ├── BUILD_ENV_ADAPTATION.md
 ├── assets/
 │   ├── python/                          # Python 3.14 运行时
+│   ├── git/                             # 静态编译 git 二进制 (aarch64)
 │   ├── lib/                             # 前端资源本地缓存
 │   │   ├── marked.min.js                # Markdown 解析器
 │   │   └── katex/                       # KaTeX 数学公式 + 字体
@@ -436,6 +443,137 @@ cp libpython_bridge.so ../app/src/main/jniLibs/arm64-v8a/
 
 ---
 
+## Git 集成架构
+
+shell 工具中执行 `git` 命令时，`ShellTool` 按三层顺序回退选择实现，保证从普通设备到 root 设备都能使用完整 Git 功能（含 HTTPS push/pull）。
+
+### 三层回退流程
+
+```
+AI 调用 shell 工具: git <subcommand> [args]
+    │
+    ▼
+ShellTool.executeGit()
+    │
+    ▼
+[第 1 层] findGitBinary()
+    │  搜索 /system/bin、/system/xbin、/vendor/bin、
+    │  /data/local/tmp、Termux 路径、PATH
+    │  (结果缓存，避免重复搜索)
+    │
+    ├─ 找到 → executeGitBinary()  ← 直接 exec，完整功能
+    │
+    ▼ 未找到
+[第 2 层] extractEmbeddedGitBinary()
+    │  从 assets/git/git 提取到 files/git_bin
+    │  (首次提取，后续直接复用可执行文件)
+    │
+    ├─ 存在且可执行 → executeGitBinary()  ← 4.2MB 静态二进制，0 依赖
+    │
+    ▼ 不存在
+[第 3 层] executeGitDulwich()
+    │  PythonBridge.init() + pip install dulwich
+    │  执行 assets/python/git_bridge.py <args>
+    │
+    └─ 纯 Python 实现，支持 17 个子命令
+```
+
+### 各层能力对比
+
+| 层 | 来源 | 大小 | HTTPS | 子命令覆盖 | 首次开销 |
+|----|------|------|-------|-----------|---------|
+| 系统 git | `/system/bin` 等 | — | ✅ | 完整 | 0 |
+| 内嵌静态 git | `assets/git/git` | 4.2MB | ✅ | 完整 | 提取一次（~50ms） |
+| dulwich | `pip install dulwich` | ~3MB | ✅ | 17 个常用命令 | pip 安装（~10s） |
+
+### 内嵌静态 git 二进制
+
+- **路径**：`assets/git/git`
+- **架构**：ARM aarch64，statically linked，stripped
+- **大小**：4.2MB，0 动态依赖
+- **功能**：完整 git（含 HTTPS push/pull/clone，依赖内嵌 OpenSSL + curl + zlib）
+- **提取位置**：`/data/data/com.example.agenttoolbox/files/git_bin`
+
+### dulwich 兜底
+
+- 脚本：[assets/python/git_bridge.py](file:///workspace/agent-toolbox/assets/python/git_bridge.py)
+- 首次执行 `git` 命令时自动 `pip install dulwich`
+- 支持子命令：`init / clone / add / commit / status / log / push / pull / fetch / branch / checkout / remote / config / tag / diff / rm / version`
+- 输出格式与原生 git 命令保持一致，便于 LLM 解析
+
+### Git 静态编译
+
+内嵌的 `assets/git/git` 通过 [tools/build_static_git.sh](file:///workspace/agent-toolbox/tools/build_static_git.sh) 交叉编译生成，Docker 化构建见 [tools/Dockerfile](file:///workspace/agent-toolbox/tools/Dockerfile)。
+
+**已验证环境**：git 2.46.0 + NDK r26d + OpenSSL 3.3.2 + curl 8.9.0 + zlib 1.3.1
+
+**Docker 构建（推荐）**：
+```bash
+cd tools
+docker build -t git-builder .
+# 提取产物到 APK assets
+docker cp $(docker create git-builder):/output/git ../assets/git/git
+```
+
+**本地构建**：
+```bash
+# 需 Linux + Docker（或已安装 NDK r26d + 依赖）
+bash tools/build_static_git.sh
+# 产物路径: /output/git → 复制到 assets/git/git
+```
+
+### Android Bionic 兼容性修复
+
+Android Bionic libc 与 glibc 差异较大，git 源码默认按 glibc 编译。脚本通过以下修复实现静态链接：
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| `pthread_setcancelstate` 未声明 | Bionic 不支持 pthread 取消 | 宏定义为空操作 |
+| `sync_file_range` 未声明 | Bionic 缺该符号 | 替换为 `fdatasync` |
+| `iconv` 未声明 | Bionic 无 iconv | `NO_ICONV=1` |
+| `libintl.h` 未找到 | Bionic 无 gettext | `NO_GETTEXT=1` |
+| `-all-static` 不识别 | lld 不支持该参数 | 改用 `-static` |
+| `-lpthread -lrt -llog` 找不到 | Bionic 内建这些库 | 手动 link 步骤绕过 Makefile |
+
+手动 link 命令（绕过 Makefile 对 Bionic 不兼容的依赖）：
+
+```bash
+$CC -static -O2 \
+    -o git \
+    -L$PREFIX/lib \
+    git.o common-main.o \
+    builtin/*.o \
+    libgit.a \
+    xdiff/lib.a \
+    reftable/libreftable.a \
+    -lcurl -lssl -lcrypto -lz -lm -ldl
+```
+
+### 验证产物
+
+```bash
+# 应输出: ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
+file assets/git/git
+
+# 应为空（0 动态依赖）
+readelf -d assets/git/git | grep NEEDED
+
+# 应约 4.2MB
+ls -lh assets/git/git
+```
+
+### Git 凭据内嵌
+
+为支持非交互式 push，remote URL 中嵌入凭据：
+
+```bash
+git remote set-url origin https://<user>:<token>@github.com/<user>/<repo>.git
+```
+
+或使用 `git config credential.helper store` + 首次输入凭据后保存到 `.git-credentials`。
+
+---
+
 ## 快速开始
 
 ### 1. 编译安装
@@ -515,8 +653,9 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.1.8（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.1（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
+- **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
 - **最低 Android**: API 24 (Android 7.0)
 - **目标 SDK**: API 32 (Android 12)
@@ -525,6 +664,27 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.1 — 项目文档与编译方式更新**
+- README.md 新增「Git 集成架构」章节（三层回退流程图、能力对比、编译说明、Bionic 兼容修复表）
+- README.md 新增「Git 静态编译」「验证产物」「Git 凭据内嵌」子章节
+- BUILD_ENV_ADAPTATION.md 新增「静态 Git 二进制构建」章节
+- tools/build_static_git.sh 重写为已验证可用的编译脚本（含 6 个 Bionic 兼容修复）
+- tools/Dockerfile 更新输出说明（4.2MB 静态二进制，0 动态依赖）
+
+**v2.4.0 — Git 三层集成 + 静态二进制编译**
+- shell 工具完整集成 git：三层回退策略（系统 git → 内嵌静态二进制 → dulwich）
+- 内嵌静态 git 二进制：aarch64，4.2MB，0 动态依赖，含 HTTPS 支持
+- 新增 [tools/build_static_git.sh](file:///workspace/agent-toolbox/tools/build_static_git.sh) 交叉编译脚本（NDK r26d + OpenSSL 3.3.2 + curl 8.9.0）
+- 新增 [tools/Dockerfile](file:///workspace/agent-toolbox/tools/Dockerfile) Docker 化可复现构建
+- 解决 6 个 Android Bionic 兼容性问题（pthread_cancel / sync_file_range / iconv / gettext / -all-static / -lpthread）
+- dulwich 兜底修复：`sys.exit` 在 exec 上下文抛 SystemExit、`pip.main` 在 pip 26.x 移除、stderr 丢失
+
+**v2.3.0 — 前端对话流修复 + ask 工具体验**
+- 修复前端首轮对话产生孤立气泡（首轮复用已有 AI 气泡）
+- 修复重复 `id="dsStreamState"`（改为 class）
+- 修复 ask 工具无 options 分支缺少提交按钮
+- 修复「✅ 已提交全部回答」气泡位置错误（插入到对应消息内容区，而非聊天末尾）
 
 **v2.1.8 — SSE 流式传输修复 + 纯文本回复兼容**
 - SSE 流式传输修复：HandlerThread 专线写入 + flushWriteHandler + endChunked 保证完整交付

@@ -100,3 +100,43 @@ gradle wrapper --gradle-version 7.5.1
 - libpython_bridge.so (JNI 桥接)
 - libcrypto.so / libssl.so (OpenSSL)
 - libsqlite3.so (SQLite)
+
+## 静态 Git 二进制构建
+
+`assets/git/git` 是独立的静态编译产物，与 APK 的 Gradle 构建流程分离，需要单独编译后放入 `assets/git/` 目录。
+
+### 构建环境
+- **NDK**: r26d（独立于 AIDE Pro 的 SDK，下载至 `/tmp/android-ndk`）
+- **工具链**: clang / clang++ / llvm-ar / llvm-strip / ld.lld
+- **依赖源码**: git 2.46.0、zlib 1.3.1、OpenSSL 3.3.2、curl 8.9.0
+- **目标**: aarch64-linux-android，API 21
+
+### 构建方式
+
+**Docker（推荐，可复现）**：
+```bash
+cd tools
+docker build -t git-builder .
+docker cp $(docker create git-builder):/output/git ../assets/git/git
+```
+
+**本地 Linux**：
+```bash
+bash tools/build_static_git.sh
+# 产物: /output/git → 复制到 assets/git/git
+```
+
+### 与 APK 构建的关系
+- Git 二进制作为 `assets` 资源打包进 APK，不需要 NDK 参与 APK 构建
+- 缺失 `assets/git/git` 时，shell 工具会自动回退到 dulwich（纯 Python Git）
+- 详见 [README.md - Git 集成架构](./README.md#git-集成架构) 和 [tools/build_static_git.sh](./tools/build_static_git.sh)
+
+### 产物验证
+```bash
+file assets/git/git
+# 期望: ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
+readelf -d assets/git/git | grep NEEDED
+# 期望: 空（0 动态依赖）
+ls -lh assets/git/git
+# 期望: 约 4.2MB
+```
