@@ -19,6 +19,12 @@ _site_dir = os.path.join(os.environ.get("PYTHONHOME", ""), "lib", "python3.14", 
 if _site_dir not in sys.path:
     sys.path.insert(0, _site_dir)
 
+# 内嵌 Python 的 sys.executable 为空字符串，pip 内部 subprocess 会用它
+# 调用 python 子进程导致 PermissionError。设为一个占位值避免空字符串崩溃；
+# 配合 --no-build-isolation 可避免 pip 启动子进程构建
+if not getattr(sys, "executable", "") or not os.path.isfile(getattr(sys, "executable", "")):
+    sys.executable = "/system/bin/sh"  # 占位，pip 不会真的执行它（--no-build-isolation + pure python wheel）
+
 
 def ensure_dulwich():
     """确保 dulwich 已安装，未安装时自动 pip install"""
@@ -30,13 +36,21 @@ def ensure_dulwich():
         try:
             # 内嵌 Python 无 sys.executable，不能 subprocess 调 python -m pip
             # 直接用 pip._internal 在进程内安装
+            # --no-build-isolation 避免 pip 启动子进程（subprocess 会因 sys.executable 无效而失败）
+            # --only-binary :all: 强制使用预编译 wheel，避免从 sdist 构建（需要 subprocess）
             from pip._internal import main as pip_main
-            ret = pip_main(["install", "--no-cache-dir", "--quiet", "dulwich"])
+            ret = pip_main([
+                "install", "--no-cache-dir", "--quiet",
+                "--no-build-isolation",
+                "--only-binary", ":all:",
+                "dulwich",
+            ])
             # pip_main 可能返回退出码也可能调用 sys.exit()
             if ret is None:
                 ret = 0
             if ret != 0:
                 print(f"pip install dulwich 失败 (退出码 {ret})")
+                print("可尝试手动下载 dulwich wheel 解压到:", _site_dir)
                 return False
             # 重新尝试导入
             import importlib
@@ -60,7 +74,7 @@ def ensure_dulwich():
                 return False
         except Exception as e:
             print(f"dulwich 安装失败: {e}")
-            print("请手动执行: pip install dulwich")
+            print("可尝试手动下载 dulwich wheel 解压到:", _site_dir)
             return False
 
 

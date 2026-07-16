@@ -653,7 +653,7 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.4.2（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.3（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
 - **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
@@ -664,6 +664,11 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.3 — Git 运行时三个 bug 修复**
+- 修复 `git_bin` 提取后 `Permission denied`：`setExecutable` 在部分设备静默失败，改用 `chmod 755` 强制设置并验证 `canExecute()`，失败则回退 dulwich
+- 修复 `which git` 报告写死"未放置"：`reportEmbeddedGit` 现在实际检查 `assets/git/git` 是否存在并报告当前生效层
+- 修复 dulwich 安装 `PermissionError: ''`：内嵌 Python `sys.executable` 为空导致 pip subprocess 崩溃，设占位值 + `--no-build-isolation` + `--only-binary :all:` 避免启动子进程
 
 **v2.4.2 — ShellTool 编译错误修复**
 - 修复 `ShellTool.executeGitDulwich()` 调用 `PythonBridge.exec()` 未捕获 `throws Exception` 导致 `:compileDebugJavaWithJavac` 失败

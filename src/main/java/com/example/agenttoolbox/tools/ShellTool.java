@@ -329,7 +329,7 @@ public class ShellTool implements Tool {
 
     /**
      * 从 assets/git/git 提取内嵌 git 二进制（如果存在）
-     * @return git 可执行文件，或 null 如果不存在
+     * @return git 可执行文件，或 null 如果不存在或无法设置可执行权限
      */
     private java.io.File extractEmbeddedGitBinary() {
         try {
@@ -356,7 +356,16 @@ public class ShellTool implements Tool {
                     fos.flush();
                 } finally { fos.close(); }
             } finally { is.close(); }
+            // setExecutable 在某些 Android 设备/文件系统上静默失败，用 chmod 755 强制设置
             outFile.setExecutable(true, false);
+            try {
+                new ProcessBuilder("chmod", "755", outFile.getAbsolutePath())
+                        .redirectErrorStream(true).start().waitFor();
+            } catch (Exception ignored) {}
+            // 验证权限确实设置成功
+            if (!outFile.canExecute()) {
+                return null; // 权限设置失败，回退到 dulwich
+            }
             return outFile;
         } catch (Exception e) {
             return null;
@@ -458,11 +467,26 @@ public class ShellTool implements Tool {
             sb.append("git 命令将直接使用此二进制执行。\n");
             return sb.toString();
         }
+        // 检查内嵌 git 二进制是否可用
+        boolean hasEmbeddedGit = false;
+        if (context != null) {
+            try {
+                context.getAssets().open("git/git").close();
+                hasEmbeddedGit = true;
+            } catch (java.io.IOException ignored) {}
+        }
         sb.append("说明: 系统未安装 git 二进制，使用三层回退策略:\n");
         sb.append("  1. 系统 git 二进制（当前未找到）\n");
-        sb.append("  2. 内嵌 git 二进制（assets/git/git，当前未放置）\n");
-        sb.append("  3. dulwich 纯 Python Git（当前生效，首次自动安装）\n\n");
-        sb.append("用法: 在 shell 中直接使用 git 命令即可，如:\n")
+        if (hasEmbeddedGit) {
+            sb.append("  2. 内嵌 git 二进制（assets/git/git，已就绪，4.2MB 静态二进制）\n");
+            sb.append("  3. dulwich 纯 Python Git（备用，首次自动安装）\n\n");
+            sb.append("当前生效: 第 2 层（内嵌静态 git 二进制）\n");
+        } else {
+            sb.append("  2. 内嵌 git 二进制（assets/git/git，当前未放置）\n");
+            sb.append("  3. dulwich 纯 Python Git（当前生效，首次自动安装）\n\n");
+            sb.append("当前生效: 第 3 层（dulwich）\n");
+        }
+        sb.append("\n用法: 在 shell 中直接使用 git 命令即可，如:\n")
           .append("  git clone <url>\n")
           .append("  git add -A && git commit -m \"msg\" && git push\n")
           .append("  git status / git log / git branch\n");
