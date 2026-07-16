@@ -26,18 +26,41 @@ def ensure_dulwich():
         import dulwich
         return True
     except ImportError:
-        print("首次使用 git，正在安装 dulwich (纯 Python Git 库)...", file=sys.stderr)
+        print("首次使用 git，正在安装 dulwich (纯 Python Git 库)...")
         try:
-            import pip
-            sys.argv = ["pip", "install", "--no-cache-dir", "dulwich"]
-            pip.main()
+            # 内嵌 Python 无 sys.executable，不能 subprocess 调 python -m pip
+            # 直接用 pip._internal 在进程内安装
+            from pip._internal import main as pip_main
+            ret = pip_main(["install", "--no-cache-dir", "--quiet", "dulwich"])
+            # pip_main 可能返回退出码也可能调用 sys.exit()
+            if ret is None:
+                ret = 0
+            if ret != 0:
+                print(f"pip install dulwich 失败 (退出码 {ret})")
+                return False
             # 重新尝试导入
+            import importlib
+            importlib.invalidate_caches()
             import dulwich
-            print("dulwich 安装完成。", file=sys.stderr)
+            print("dulwich 安装完成。")
             return True
+        except SystemExit as se:
+            # pip 可能调用 sys.exit()，捕获后判断
+            if se.code is not None and se.code != 0:
+                print(f"pip install dulwich 失败 (SystemExit: {se.code})")
+                return False
+            import importlib
+            importlib.invalidate_caches()
+            try:
+                import dulwich
+                print("dulwich 安装完成。")
+                return True
+            except ImportError:
+                print("dulwich 安装后仍无法导入")
+                return False
         except Exception as e:
-            print(f"dulwich 安装失败: {e}", file=sys.stderr)
-            print("请手动执行: pip install dulwich", file=sys.stderr)
+            print(f"dulwich 安装失败: {e}")
+            print("请手动执行: pip install dulwich")
             return False
 
 
@@ -464,5 +487,8 @@ def main():
     return COMMANDS[subcmd](args)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# 通过 exec() 执行时不依赖 __name__，直接调用 main()
+# 不使用 sys.exit()，避免 SystemExit 异常导致 JNI 层报错
+_exit_code = main()
+if _exit_code and _exit_code != 0:
+    sys.stderr.write(f"\n[git_bridge 退出码: {_exit_code}]\n")

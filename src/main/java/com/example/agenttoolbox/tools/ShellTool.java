@@ -261,21 +261,22 @@ public class ShellTool implements Tool {
     /**
      * 构造执行 git_bridge.py 的 Python 代码
      * 通过 sys.argv 传递参数，类似命令行调用
+     * 将 stderr 重定向到 stdout，确保 JNI 层捕获所有输出
      */
     private String buildGitExecCode(String scriptPath, String gitArgs) {
-        // 将 gitArgs 按空格拆分为参数列表（简单实现，支持引号）
-        // 用 Python 的 shlex.split 更可靠
         StringBuilder sb = new StringBuilder();
-        sb.append("import sys, os, runpy\n");
+        sb.append("import sys, os\n");
+        // 将 stderr 重定向到 stdout，因为 nativeExec 可能只捕获 stdout
+        sb.append("sys.stderr = sys.stdout\n");
+        // 用 shlex.split 解析参数（支持引号）
         sb.append("sys.argv = ['git'] + __import__('shlex').split(");
-        // 转义引号
         String escaped = gitArgs.replace("\\", "\\\\").replace("'", "\\'");
         sb.append("'").append(escaped).append("'");
         sb.append(")\n");
         // 设置脚本所在目录到 sys.path
         sb.append("script_dir = os.path.dirname('").append(scriptPath.replace("\\", "\\\\")).append("')\n");
         sb.append("if script_dir not in sys.path: sys.path.insert(0, script_dir)\n");
-        // 执行脚本
+        // 执行脚本（用 exec，不依赖 __name__ == '__main__'）
         sb.append("exec(open('").append(scriptPath.replace("\\", "\\\\")).append("', encoding='utf-8').read())\n");
         return sb.toString();
     }
