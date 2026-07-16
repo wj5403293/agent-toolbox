@@ -84,6 +84,8 @@ public class PythonBridge {
                 // pip 已直接打包进 stdlib（assets/python/stdlib/pip/），
                 // 随 stdlib 一起提取到 pythonHome/lib/python3.14/，
                 // 处于默认 sys.path 中，无需运行时引导安装。
+                // 提取内嵌 git 二进制并注入 PATH，让 python 的 subprocess 能找到 git
+                ensureGitBinaryOnPath(context);
                 return true;
             }
 
@@ -126,6 +128,76 @@ public class PythonBridge {
         if (jniLoaded) {
             try { nativeShutdown(); } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * 提取内嵌 git 二进制（assets/git/git）到 filesDir/git_bin，
+     * 并通过 Python 代码把其所在目录注入 os.environ['PATH']，
+     * 让 python 的 subprocess 调用 git 时能找到内嵌二进制。
+     * 失败时静默跳过（dulwich 兜底仍可用）。
+     */
+    private static void ensureGitBinaryOnPath(Context context) {
+        try {
+            File outFile = new File(context.getFilesDir(), "git_bin");
+            // 检查 assets 中是否有 git 二进制
+            try {
+                context.getAssets().open("git/git").close();
+            } catch (IOException e) {
+                return; // assets 中没有 git 二进制，跳过
+            }
+            // 已提取且可执行则直接用
+            if (!(outFile.exists() && outFile.canExecute())) {
+                // 提取
+                InputStream is = context.getAssets().open("git/git");
+                try {
+                    FileOutputStream fos = new FileOutputStream(outFile);
+                    try {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                        fos.flush();
+                    } finally { fos.close(); }
+                } finally { is.close(); }
+                // setExecutable 在部分设备静默失败，用 chmod 755 强制
+                outFile.setExecutable(true, false);
+                try {
+                    new ProcessBuilder("chmod", "755", outFile.getAbsolutePath())
+                            .redirectErrorStream(true).start().waitFor();
+                } catch (Exception ignored) {}
+            }
+            if (!outFile.canExecute()) {
+                AppLogger.w("PythonBridge", "git_bin 不可执行，跳过 PATH 注入");
+                return;
+            }
+            // 注入 PATH: 把 filesDir 加到 PATH 前面，让 subprocess 找到 git_bin
+            String filesDir = context.getFilesDir().getAbsolutePath();
+            String pathBootstrap =
+                "import os\n" +
+                "_d = " + repr(filesDir) + "\n" +
+                "_p = os.environ.get('PATH', '')\n" +
+                "if _d not in _p.split(os.pathsep):\n" +
+                "    os.environ['PATH'] = _d + os.pathsep + _p\n";
+            try {
+                nativeExec(pathBootstrap);
+                AppLogger.i("PythonBridge", "已注入 git_bin 路径到 PATH: " + filesDir);
+            } catch (Exception e) {
+                AppLogger.w("PythonBridge", "PATH 注入失败: " + e.getMessage());
+            }
+        } catch (Exception e) {
+            AppLogger.w("PythonBridge", "ensureGitBinaryOnPath 失败: " + e.getMessage());
+        }
+    }
+
+    /** Java 字符串转 Python 字面量（单引号包围，转义内部单引号和反斜杠） */
+    private static String repr(String s) {
+        StringBuilder sb = new StringBuilder("'");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c == '\'') sb.append('\\');
+            sb.append(c);
+        }
+        sb.append("'");
+        return sb.toString();
     }
 
     // ===== JNI =====

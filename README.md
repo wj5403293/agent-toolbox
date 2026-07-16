@@ -653,7 +653,7 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.4.3（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.4（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
 - **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
@@ -664,6 +664,11 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.4 — Python 工具内 subprocess 调用 git 支持**
+- 修复 python 工具里 `subprocess.run(['git', ...])` 报 `Permission denied: 'git'`：内嵌 Python 的 PATH 中没有 git
+- `PythonBridge.init` 成功后自动提取 `assets/git/git` 到 `filesDir/git_bin`（chmod 755 + canExecute 验证），并执行 bootstrap Python 代码把 `filesDir` 注入 `os.environ['PATH']`
+- 现在 python 工具和 shell 工具都能直接使用内嵌静态 git 二进制
 
 **v2.4.3 — Git 运行时三个 bug 修复**
 - 修复 `git_bin` 提取后 `Permission denied`：`setExecutable` 在部分设备静默失败，改用 `chmod 755` 强制设置并验证 `canExecute()`，失败则回退 dulwich
