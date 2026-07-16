@@ -26,8 +26,8 @@ public class PythonBridge {
     private static final String STDLIB_ASSET_DIR = "python/stdlib";
     private static final String PYTHON_DIR_NAME = "python";
     private static final String VERSION_FILE = ".python_version";
-    // v4: pip 直接打包进 stdlib（assets/python/stdlib/pip/），无需运行时引导安装
-    private static final String EXPECTED_VERSION = "3.14.6-official-v4";
+    // v5: 修复 ShellTool python -m 的 sys.argv 构造 bug
+    private static final String EXPECTED_VERSION = "3.14.6-official-v5";
 
     private static boolean jniLoaded = false;
     private static boolean jniInitOk = false;
@@ -167,11 +167,13 @@ public class PythonBridge {
     }
 
     private static boolean isStdlibReady(File dir) {
-        // 校验关键文件 + 易丢失的无扩展名子目录（曾因提取 bug 丢失 zipfile/_path）
+        // 校验关键文件 + 易丢失的子目录（曾因提取 bug 丢失）
         return dir.exists()
             && new File(dir, "lib/python3.14/os.py").exists()
             && new File(dir, "lib/python3.14/encodings/__init__.py").exists()
-            && new File(dir, "lib/python3.14/zipfile/_path/__init__.py").exists();
+            && new File(dir, "lib/python3.14/zipfile/_path/__init__.py").exists()
+            && new File(dir, "lib/python3.14/pip/__init__.py").exists()
+            && new File(dir, "lib/python3.14/pip/_internal/__init__.py").exists();
     }
 
     private static void logFileTree(File dir, int depth) {

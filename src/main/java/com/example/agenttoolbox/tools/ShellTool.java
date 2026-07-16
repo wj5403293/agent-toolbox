@@ -135,8 +135,14 @@ public class ShellTool implements Tool {
                 }
             } else if (args.startsWith("-m ")) {
                 // python -m module args — 执行模块
+                // moduleArgs 形如 "pip install requests"，需拆成模块名 + 参数
                 String moduleArgs = args.substring(3).trim();
-                code = "import sys, runpy; sys.argv = ['" + moduleArgs.replace("\"", "\\\"") + "'].split(); runpy.run_module('" + moduleArgs.split(" ")[0] + "', run_name='__main__')";
+                String[] parts = moduleArgs.split("\\s+", 2);
+                String moduleName = parts[0];
+                // sys.argv[0] 是模块名，后续是参数。用 Python list 字面量构造，避免转义问题
+                // 注意：原代码 ['pip install requests'].split() 错误地对 list 调 split，
+                // 改为对字符串 split：sys.argv = 'pip install requests'.split()
+                code = "import sys, runpy; sys.argv = '" + moduleArgs.replace("'", "\\'") + "'.split(); runpy.run_module('" + moduleName.replace("'", "\\'") + "', run_name='__main__')";
             } else if (!args.isEmpty()) {
                 String path = args;
                 java.io.File file = new java.io.File(path);
