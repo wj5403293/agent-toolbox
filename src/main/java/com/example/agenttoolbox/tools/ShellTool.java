@@ -383,8 +383,12 @@ public class ShellTool implements Tool {
 
         sb.append("[dulwich 模式]\n");
         String pythonCode = buildGitExecCode(bridgeScript.getAbsolutePath(), gitArgs);
-        String result = PythonBridge.exec(pythonCode);
-        sb.append(result);
+        try {
+            String result = PythonBridge.exec(pythonCode);
+            sb.append(result);
+        } catch (Exception e) {
+            sb.append("[错误] dulwich 执行失败: ").append(e.getMessage());
+        }
         return sb.toString();
     }
 
