@@ -43,3 +43,5 @@ Thumbs.db
 
 # 压缩包（测试用 zip 不提交）
 *.zip
+# 例外：pip 必须以 zip 形式打包进 assets，绕过 AAPT2 深层目录丢失
+!assets/python/stdlib/pip.zip
