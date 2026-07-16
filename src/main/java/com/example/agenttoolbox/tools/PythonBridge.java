@@ -190,8 +190,14 @@ public class PythonBridge {
         sb.append("os.environ['GIT_TEMPLATE_DIR'] = ''\n");
         // c-ares DNS 服务器（Android 静态二进制的 getaddrinfo 不工作）
         sb.append("os.environ['GIT_DNS_SERVERS'] = '8.8.8.8,8.8.4.4,1.1.1.1'\n");
-        // SSL CA 证书路径（静态 OpenSSL 无内置 CA 路径，用 Android 系统 CA 证书）
-        sb.append("os.environ['SSL_CERT_DIR'] = '/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'\n");
+        // SSL CA 证书：内嵌 Mozilla CA 证书包（cacert.pem），比系统 CA 目录更可靠
+        String caBundle = ensureCacertBundle(context);
+        if (caBundle != null) {
+            sb.append("os.environ['SSL_CERT_FILE'] = ").append(repr(caBundle)).append("\n");
+            sb.append("os.environ['CURL_CA_BUNDLE'] = ").append(repr(caBundle)).append("\n");
+        } else {
+            sb.append("os.environ['SSL_CERT_DIR'] = '/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'\n");
+        }
         // 如果 'git' 名不存在但 libgit.so 存在，patch subprocess
         sb.append("if not os.path.exists(os.path.join(_d, 'git')):\n");
         sb.append("    import subprocess as _sp\n");
@@ -243,6 +249,37 @@ public class PythonBridge {
             try { android.system.Os.remove(link.getAbsolutePath()); } catch (Exception ignored) {}
             android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * 从 assets/git/cacert.pem 提取 Mozilla CA 证书包到 filesDir/cacert.pem。
+     * 静态 OpenSSL 无内置 CA 路径，需要显式提供 CA 证书用于 HTTPS 验证。
+     * @return cacert.pem 路径，或 null
+     */
+    private static String ensureCacertBundle(Context context) {
+        if (context == null) return null;
+        try {
+            File caFile = new File(context.getFilesDir(), "cacert.pem");
+            if (caFile.exists() && caFile.length() > 1024) {
+                return caFile.getAbsolutePath();
+            }
+            InputStream is = context.getAssets().open("git/cacert.pem");
+            try {
+                FileOutputStream fos = new FileOutputStream(caFile);
+                try {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                    fos.flush();
+                } finally { fos.close(); }
+            } finally { is.close(); }
+            if (caFile.length() > 1024) {
+                return caFile.getAbsolutePath();
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 从 assets/git/git 提取到 filesDir/git_bin，返回可执行文件或 null */

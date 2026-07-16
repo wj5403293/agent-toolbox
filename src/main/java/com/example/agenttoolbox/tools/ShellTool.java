@@ -144,6 +144,8 @@ public class ShellTool implements Tool {
                 // 确保 GIT_EXEC_PATH 就绪（含 git-remote-https 符号链接）
                 String execPath = ensureGitExecPath();
                 String filesDir = context.getFilesDir().getAbsolutePath();
+                // 确保 CA 证书包就绪
+                String caBundle = ensureCacertBundle();
                 StringBuilder prefix = new StringBuilder();
                 // 注入环境变量
                 if (execPath != null) {
@@ -152,7 +154,12 @@ public class ShellTool implements Tool {
                 prefix.append("export HOME=").append(filesDir).append("; ");
                 prefix.append("export GIT_TEMPLATE_DIR=''; ");
                 prefix.append("export GIT_DNS_SERVERS='8.8.8.8,8.8.4.4,1.1.1.1'; ");
-                prefix.append("export SSL_CERT_DIR='/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'; ");
+                if (caBundle != null) {
+                    prefix.append("export SSL_CERT_FILE='").append(caBundle).append("'; ");
+                    prefix.append("export CURL_CA_BUNDLE='").append(caBundle).append("'; ");
+                } else {
+                    prefix.append("export SSL_CERT_DIR='/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'; ");
+                }
                 // 注入 git 函数
                 prefix.append("git() { ").append(libGit.getAbsolutePath()).append(" \"$@\"; }; ");
                 return prefix + command;
@@ -464,7 +471,7 @@ public class ShellTool implements Tool {
      * - GIT_EXEC_PATH: 指向 filesDir/git-exec/，内含符号链接 git-remote-https → nativeLibraryDir/libgitremotehttps.so
      * - HOME: 指向 filesDir（git 需要写 ~/.gitconfig 等）
      * - GIT_TEMPLATE_DIR: 设为空避免 "templates not found" 警告
-     * - SSL_CERT_DIR: Android 系统 CA 证书目录（静态 OpenSSL 无内置 CA 路径）
+     * - SSL_CERT_FILE: 内嵌 Mozilla CA 证书包（静态 OpenSSL 无内置 CA 路径）
      * - GIT_DNS_SERVERS: c-ares DNS 服务器（静态 libc getaddrinfo 不工作）
      * execve 符号链接时 SELinux 检查目标文件（app_lib_data_file 允许执行），不是链接本身。
      */
@@ -482,15 +489,59 @@ public class ShellTool implements Tool {
             // c-ares DNS 服务器（Android 静态二进制的 getaddrinfo 不工作，
             // curl 编译时启用 c-ares，通过此环境变量设置 DNS 服务器）
             env.put("GIT_DNS_SERVERS", "8.8.8.8,8.8.4.4,1.1.1.1");
-            // SSL CA 证书路径：静态 OpenSSL 编译时 --prefix=/tmp/static_prefix，
-            // 默认 CApath 指向设备上不存在的 /tmp/static_prefix/ssl/certs，
-            // 导致 "unable to get local issuer certificate"。
-            // Android 系统 CA 证书存放在 /system/etc/security/cacerts/，
-            // 以 OpenSSL 哈希格式（<hash>.0）存储，正是 --capath 期望的格式。
-            // Android 14+ 部分 CA 在 /apex/com.android.conscrypt/cacerts/。
-            env.put("SSL_CERT_DIR", "/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts");
+            // SSL CA 证书：静态 OpenSSL 编译时 --prefix=/tmp/static_prefix，
+            // 默认 CApath/CAfile 指向设备上不存在的路径。
+            // SSL_CERT_DIR（目录形式）在 Android 14+ 上不可靠——系统 CA 目录可能为空
+            // 或格式不匹配。改用 SSL_CERT_FILE 指向内嵌的 Mozilla CA 证书包（cacert.pem），
+            // 包含 119 个受信任根 CA，是最可靠的跨平台方案。
+            String caBundle = ensureCacertBundle();
+            if (caBundle != null) {
+                env.put("SSL_CERT_FILE", caBundle);
+                env.put("CURL_CA_BUNDLE", caBundle);
+            } else {
+                // 回退到系统 CA 目录
+                env.put("SSL_CERT_DIR", "/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts");
+            }
         } catch (Exception ignored) {}
         return env;
+    }
+
+    /**
+     * 从 assets/git/cacert.pem 提取 Mozilla CA 证书包到 filesDir/cacert.pem。
+     * 静态 OpenSSL 没有内置 CA 路径，需要显式提供 CA 证书用于 HTTPS 验证。
+     * @return cacert.pem 路径，或 null 如果提取失败
+     */
+    private String ensureCacertBundle() {
+        if (context == null) return null;
+        try {
+            java.io.File caFile = new java.io.File(context.getFilesDir(), "cacert.pem");
+            // 已提取则直接用（检查大小 >1KB 防止空文件）
+            if (caFile.exists() && caFile.length() > 1024) {
+                return caFile.getAbsolutePath();
+            }
+            // 从 assets 提取
+            android.content.res.AssetManager am = context.getAssets();
+            try {
+                java.io.InputStream is = am.open("git/cacert.pem");
+                try {
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(caFile);
+                    try {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                        fos.flush();
+                    } finally { fos.close(); }
+                } finally { is.close(); }
+            } catch (java.io.IOException e) {
+                return null; // assets 中没有 cacert.pem
+            }
+            if (caFile.length() > 1024) {
+                return caFile.getAbsolutePath();
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
