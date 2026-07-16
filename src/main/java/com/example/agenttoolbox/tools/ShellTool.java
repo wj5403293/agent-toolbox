@@ -306,10 +306,18 @@ public class ShellTool implements Tool {
 
     /**
      * 用真正的 git 二进制执行命令
+     * 注意：不能用 sh -c，因为 filesDir 下的文件 SELinux 标记为 app_data_file，
+     * sh 拒绝执行（退出码 126 Permission denied）。必须用 Runtime.exec 直接 execve
+     * nativeLibraryDir/libgit.so（标记为 app_lib_data_file，允许执行）。
      */
     private String executeGitBinary(StringBuilder sb, String gitPath, String gitArgs, int timeout) {
         try {
-            ProcessRunner.Result result = ProcessRunner.execShell(gitPath + " " + gitArgs, timeout);
+            // 用 shlex 风格分割参数（支持引号），避免 sh -c 的 SELinux 问题
+            String[] args = splitShellArgs(gitArgs);
+            String[] cmd = new String[args.length + 1];
+            cmd[0] = gitPath;
+            System.arraycopy(args, 0, cmd, 1, args.length);
+            ProcessRunner.Result result = ProcessRunner.exec(cmd, timeout);
             sb.append("退出码: ").append(result.exitCode).append("\n");
             if (result.timedOut) {
                 sb.append("⚠️ 命令超时（").append(timeout).append("秒），已被强制终止\n");
@@ -322,16 +330,60 @@ public class ShellTool implements Tool {
             return sb.toString();
         } catch (Exception e) {
             // git 二进制执行失败，回退到 dulwich
-            sb.append("[git 二进制执行失败，回退到 dulwich]\n");
+            sb.append("[git 二进制执行失败: ").append(e.getMessage()).append("，回退到 dulwich]\n");
             return executeGitDulwich(sb, gitArgs);
         }
     }
 
     /**
-     * 从 assets/git/git 提取内嵌 git 二进制（如果存在）
-     * @return git 可执行文件，或 null 如果不存在或无法设置可执行权限
+     * 简单的 shell 参数分割：按空白分割，支持单引号/双引号包围含空白的参数
+     */
+    private static String[] splitShellArgs(String s) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        if (s == null || s.isEmpty()) return new String[0];
+        StringBuilder cur = new StringBuilder();
+        char quote = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (quote != 0) {
+                if (c == quote) {
+                    quote = 0;
+                } else {
+                    cur.append(c);
+                }
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (Character.isWhitespace(c)) {
+                if (cur.length() > 0) {
+                    result.add(cur.toString());
+                    cur.setLength(0);
+                }
+            } else {
+                cur.append(c);
+            }
+        }
+        if (cur.length() > 0) result.add(cur.toString());
+        return result.toArray(new String[0]);
+    }
+
+    /**
+     * 获取内嵌 git 二进制路径。
+     * 优先使用 nativeLibraryDir/libgit.so（由 jniLibs 打包，AGP 自动解压并设置可执行权限，
+     * SELinux 标记为 app_lib_data_file 允许执行）。
+     * 回退到从 assets/git/git 提取到 filesDir/git_bin（可能因 SELinux 不可执行）。
+     * @return git 可执行文件，或 null 如果不可用
      */
     private java.io.File extractEmbeddedGitBinary() {
+        // 优先：nativeLibraryDir/libgit.so（APK 安装时自动解压，SELinux 允许执行）
+        try {
+            String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            java.io.File libGit = new java.io.File(nativeLibDir, "libgit.so");
+            if (libGit.exists() && libGit.canExecute()) {
+                return libGit;
+            }
+        } catch (Exception ignored) {}
+
+        // 回退：从 assets/git/git 提取到 filesDir/git_bin（可能因 SELinux 不可执行）
         try {
             java.io.File outFile = new java.io.File(context.getFilesDir(), "git_bin");
             // 检查 assets 中是否有 git 二进制
@@ -467,18 +519,33 @@ public class ShellTool implements Tool {
             sb.append("git 命令将直接使用此二进制执行。\n");
             return sb.toString();
         }
-        // 检查内嵌 git 二进制是否可用
+        // 检查内嵌 git 二进制是否可用（优先 nativeLibraryDir/libgit.so）
         boolean hasEmbeddedGit = false;
+        String embeddedGitPath = null;
         if (context != null) {
             try {
-                context.getAssets().open("git/git").close();
-                hasEmbeddedGit = true;
-            } catch (java.io.IOException ignored) {}
+                String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+                java.io.File libGit = new java.io.File(nativeLibDir, "libgit.so");
+                if (libGit.exists() && libGit.canExecute()) {
+                    hasEmbeddedGit = true;
+                    embeddedGitPath = libGit.getAbsolutePath();
+                }
+            } catch (Exception ignored) {}
+            if (!hasEmbeddedGit) {
+                try {
+                    context.getAssets().open("git/git").close();
+                    hasEmbeddedGit = true;
+                } catch (java.io.IOException ignored) {}
+            }
         }
         sb.append("说明: 系统未安装 git 二进制，使用三层回退策略:\n");
         sb.append("  1. 系统 git 二进制（当前未找到）\n");
         if (hasEmbeddedGit) {
-            sb.append("  2. 内嵌 git 二进制（assets/git/git，已就绪，4.2MB 静态二进制）\n");
+            if (embeddedGitPath != null) {
+                sb.append("  2. 内嵌 git 二进制（").append(embeddedGitPath).append("，已就绪，4.2MB 静态二进制）\n");
+            } else {
+                sb.append("  2. 内嵌 git 二进制（assets/git/git，已就绪，4.2MB 静态二进制）\n");
+            }
             sb.append("  3. dulwich 纯 Python Git（备用，首次自动安装）\n\n");
             sb.append("当前生效: 第 2 层（内嵌静态 git 二进制）\n");
         } else {

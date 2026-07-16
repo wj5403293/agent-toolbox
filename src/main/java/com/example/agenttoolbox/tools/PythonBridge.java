@@ -131,60 +131,102 @@ public class PythonBridge {
     }
 
     /**
-     * 提取内嵌 git 二进制（assets/git/git）到 filesDir/git_bin，
-     * 并通过 Python 代码把其所在目录注入 os.environ['PATH']，
-     * 让 python 的 subprocess 调用 git 时能找到内嵌二进制。
+     * 确保内嵌 git 二进制可用并注入 PATH，让 python 的 subprocess 调用 git 时能找到。
+     * 优先使用 nativeLibraryDir/libgit.so（SELinux 标记为 app_lib_data_file，允许执行）。
+     * 回退到从 assets/git/git 提取到 filesDir/git_bin（可能因 SELinux 不可执行）。
      * 失败时静默跳过（dulwich 兜底仍可用）。
      */
     private static void ensureGitBinaryOnPath(Context context) {
+        // 优先：nativeLibraryDir/libgit.so（APK 安装时自动解压，SELinux 允许执行）
+        File libGit = null;
+        try {
+            String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            libGit = new File(nativeLibDir, "libgit.so");
+            if (!libGit.exists() || !libGit.canExecute()) {
+                libGit = null;
+            }
+        } catch (Exception ignored) {}
+
+        // 回退：从 assets 提取到 filesDir/git_bin
+        if (libGit == null) {
+            libGit = extractGitToFilesDir(context);
+        }
+        if (libGit == null) {
+            AppLogger.w("PythonBridge", "无可用 git 二进制，跳过 PATH 注入（dulwich 兜底）");
+            return;
+        }
+
+        // 注入 PATH: 把 git 二进制所在目录加到 PATH 前面，让 subprocess 找到 git
+        // 同时创建一个名为 "git" 的符号链接/副本指向 libgit.so（subprocess 按 "git" 名查找）
+        File gitDir = libGit.getParentFile();
+        File gitLink = new File(gitDir, "git");
+        if (!gitLink.exists()) {
+            try {
+                // 尝试创建硬链接/复制
+                java.nio.file.Files.copy(libGit.toPath(), gitLink.toPath());
+                gitLink.setExecutable(true, false);
+            } catch (Exception e) {
+                // 复制失败（可能 nativeLibraryDir 不可写），改用 PATH + 自定义查找逻辑
+                AppLogger.w("PythonBridge", "无法创建 git 副本: " + e.getMessage());
+            }
+        }
+        String pathDir = gitDir.getAbsolutePath();
+        String pathBootstrap =
+            "import os\n" +
+            "_d = " + repr(pathDir) + "\n" +
+            "_p = os.environ.get('PATH', '')\n" +
+            "if _d not in _p.split(os.pathsep):\n" +
+            "    os.environ['PATH'] = _d + os.pathsep + _p\n" +
+            "# 如果 'git' 名不存在但 libgit.so 存在，patch subprocess 让它查找 libgit.so\n" +
+            "if not os.path.exists(os.path.join(_d, 'git')):\n" +
+            "    import subprocess as _sp\n" +
+            "    _orig_popen = _sp.Popen\n" +
+            "    class _GitPopen(_orig_popen):\n" +
+            "        def __init__(self, args, *a, **kw):\n" +
+            "            if isinstance(args, list) and args and args[0] == 'git':\n" +
+            "                args = ['libgit.so'] + args[1:]\n" +
+            "            _orig_popen.__init__(self, args, *a, **kw)\n" +
+            "    _sp.Popen = _GitPopen\n";
+        try {
+            nativeExec(pathBootstrap);
+            AppLogger.i("PythonBridge", "已注入 git 路径到 PATH: " + pathDir);
+        } catch (Exception e) {
+            AppLogger.w("PythonBridge", "PATH 注入失败: " + e.getMessage());
+        }
+    }
+
+    /** 从 assets/git/git 提取到 filesDir/git_bin，返回可执行文件或 null */
+    private static File extractGitToFilesDir(Context context) {
         try {
             File outFile = new File(context.getFilesDir(), "git_bin");
             // 检查 assets 中是否有 git 二进制
             try {
                 context.getAssets().open("git/git").close();
             } catch (IOException e) {
-                return; // assets 中没有 git 二进制，跳过
+                return null;
             }
-            // 已提取且可执行则直接用
-            if (!(outFile.exists() && outFile.canExecute())) {
-                // 提取
-                InputStream is = context.getAssets().open("git/git");
-                try {
-                    FileOutputStream fos = new FileOutputStream(outFile);
-                    try {
-                        byte[] buf = new byte[8192];
-                        int n;
-                        while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
-                        fos.flush();
-                    } finally { fos.close(); }
-                } finally { is.close(); }
-                // setExecutable 在部分设备静默失败，用 chmod 755 强制
-                outFile.setExecutable(true, false);
-                try {
-                    new ProcessBuilder("chmod", "755", outFile.getAbsolutePath())
-                            .redirectErrorStream(true).start().waitFor();
-                } catch (Exception ignored) {}
+            if (outFile.exists() && outFile.canExecute()) {
+                return outFile;
             }
-            if (!outFile.canExecute()) {
-                AppLogger.w("PythonBridge", "git_bin 不可执行，跳过 PATH 注入");
-                return;
-            }
-            // 注入 PATH: 把 filesDir 加到 PATH 前面，让 subprocess 找到 git_bin
-            String filesDir = context.getFilesDir().getAbsolutePath();
-            String pathBootstrap =
-                "import os\n" +
-                "_d = " + repr(filesDir) + "\n" +
-                "_p = os.environ.get('PATH', '')\n" +
-                "if _d not in _p.split(os.pathsep):\n" +
-                "    os.environ['PATH'] = _d + os.pathsep + _p\n";
+            InputStream is = context.getAssets().open("git/git");
             try {
-                nativeExec(pathBootstrap);
-                AppLogger.i("PythonBridge", "已注入 git_bin 路径到 PATH: " + filesDir);
-            } catch (Exception e) {
-                AppLogger.w("PythonBridge", "PATH 注入失败: " + e.getMessage());
-            }
+                FileOutputStream fos = new FileOutputStream(outFile);
+                try {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                    fos.flush();
+                } finally { fos.close(); }
+            } finally { is.close(); }
+            outFile.setExecutable(true, false);
+            try {
+                new ProcessBuilder("chmod", "755", outFile.getAbsolutePath())
+                        .redirectErrorStream(true).start().waitFor();
+            } catch (Exception ignored) {}
+            if (!outFile.canExecute()) return null;
+            return outFile;
         } catch (Exception e) {
-            AppLogger.w("PythonBridge", "ensureGitBinaryOnPath 失败: " + e.getMessage());
+            return null;
         }
     }
 

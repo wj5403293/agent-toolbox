@@ -653,9 +653,9 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.4.4（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.5（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
-- **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB)
+- **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB，以 libgit.so 打包)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
 - **最低 Android**: API 24 (Android 7.0)
 - **目标 SDK**: API 32 (Android 12)
@@ -664,6 +664,14 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.5 — 修复 SELinux 导致 git 二进制不可执行**
+- 根因：`filesDir/git_bin` 的 SELinux 标记为 `app_data_file`，Android 禁止 execve，即使 chmod 755 也报退出码 126 Permission denied
+- 修复：git 二进制改以 `jniLibs/arm64-v8a/libgit.so` 打包，APK 安装时自动解压到 `nativeLibraryDir`，SELinux 标记为 `app_lib_data_file` 允许执行
+- build.gradle 新增 `packagingOptions { jniLibs { useLegacyPackaging = true } }` 强制解压 .so（AGP 3.6+ 默认不解压）
+- `executeGitBinary` 改用 `Runtime.exec(String[])` 直接 execve，不再走 `sh -c`（避免 sh 的 SELinux 检查）
+- `ShellTool` 和 `PythonBridge` 优先使用 `nativeLibraryDir/libgit.so`，回退到 assets 提取
+- `PythonBridge` 注入 PATH 时若无法创建 `git` 副本，patch `subprocess.Popen` 把 `git` 重定向到 `libgit.so`
 
 **v2.4.4 — Python 工具内 subprocess 调用 git 支持**
 - 修复 python 工具里 `subprocess.run(['git', ...])` 报 `Permission denied: 'git'`：内嵌 Python 的 PATH 中没有 git

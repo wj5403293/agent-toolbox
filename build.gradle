@@ -54,9 +54,18 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    
+
     kotlinOptions {
         jvmTarget = '17'
+    }
+
+    // libgit.so 是可执行的 git 二进制（非共享库），必须解压到 nativeLibraryDir
+    // 才能被 execve 执行。AGP 3.6+ 默认 extractNativeLibs=false 会把 .so 压缩打包
+    // 且不解压，导致 Runtime.exec() 失败。useLegacyPackaging=true 强制解压。
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
