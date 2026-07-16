@@ -190,9 +190,10 @@ public class PythonBridge {
         sb.append("os.environ['GIT_TEMPLATE_DIR'] = ''\n");
         // c-ares DNS 服务器（Android 静态二进制的 getaddrinfo 不工作）
         sb.append("os.environ['GIT_DNS_SERVERS'] = '8.8.8.8,8.8.4.4,1.1.1.1'\n");
-        // SSL: 静态 OpenSSL 加载 cacert.pem 段错误，临时用 sslVerify=false 跳过验证
-        ensureCacertBundle(context); // 仍提取 cacert.pem 供后续使用
-        ensureGitConfig(context, null);
+        // SSL: 用 GIT_SSL_NO_VERIFY=true 跳过验证（静态 OpenSSL 加载 CA 文件段错误）
+        // 删除旧 .gitconfig 防止 v2.4.14 的 sslCAInfo 残留导致段错误
+        cleanupGitConfig(context);
+        sb.append("os.environ['GIT_SSL_NO_VERIFY'] = 'true'\n");
         // 如果 'git' 名不存在但 libgit.so 存在，patch subprocess
         sb.append("if not os.path.exists(os.path.join(_d, 'git')):\n");
         sb.append("    import subprocess as _sp\n");
@@ -278,27 +279,16 @@ public class PythonBridge {
     }
 
     /**
-     * 写 .gitconfig 设置 http.sslVerify=false（临时禁用 SSL 验证，
-     * 静态 OpenSSL 加载 cacert.pem 时段错误）+ sslCAInfo（保留供后续启用）。
+     * 删除 .gitconfig（清除 v2.4.14 的 sslCAInfo，导致 git-remote-https 段错误）。
+     * SSL 验证改用 GIT_SSL_NO_VERIFY=true 环境变量。
      */
-    private static void ensureGitConfig(Context context, String caBundlePath) {
+    private static void cleanupGitConfig(Context context) {
         if (context == null) return;
         try {
             File gitconfig = new File(context.getFilesDir(), ".gitconfig");
-            String marker = "# agent-toolbox git config v2";
             if (gitconfig.exists()) {
-                try {
-                    String old = new String(java.nio.file.Files.readAllBytes(gitconfig.toPath()), "UTF-8");
-                    if (old.contains(marker)) return;
-                } catch (Exception ignored) {}
                 gitconfig.delete();
             }
-            StringBuilder sb = new StringBuilder();
-            sb.append(marker).append("\n");
-            sb.append("[http]\n");
-            // 临时禁用 SSL 验证（静态 OpenSSL 加载 cacert.pem 段错误），不设 sslCAInfo
-            sb.append("\tsslVerify = false\n");
-            java.nio.file.Files.write(gitconfig.toPath(), sb.toString().getBytes("UTF-8"));
         } catch (Exception ignored) {}
     }
 
