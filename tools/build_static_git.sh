@@ -201,11 +201,38 @@ $CC -static -O2 \
 # strip 减小体积
 $STRIP git
 
+# 修复 TLS 段对齐：Android 14+ Bionic 要求 PT_TLS p_align >= 64
+# OpenSSL 的 __thread 变量默认对齐 8，导致运行时报:
+#   executable's TLS segment is underaligned: alignment is 8, needs to be at least 64
+# 直接修改 ELF 程序头的 p_align 字段从 8 改为 64
+echo "=== 修复 TLS 段对齐 (8 → 64) ==="
+python3 -c "
+import struct
+with open('git', 'rb') as f:
+    data = bytearray(f.read())
+e_phoff = struct.unpack_from('<Q', data, 32)[0]
+e_phentsize = struct.unpack_from('<H', data, 54)[0]
+e_phnum = struct.unpack_from('<H', data, 56)[0]
+for i in range(e_phnum):
+    off = e_phoff + i * e_phentsize
+    p_type = struct.unpack_from('<I', data, off)[0]
+    if p_type == 7:  # PT_TLS
+        p_align_off = off + 48
+        old = struct.unpack_from('<Q', data, p_align_off)[0]
+        struct.pack_into('<Q', data, p_align_off, 64)
+        print(f'  PT_TLS p_align: {old} -> 64')
+        break
+with open('git', 'wb') as f:
+    f.write(data)
+"
+
 # 检查是否真的是静态的
 echo "=== 检查二进制 ==="
 file git
 echo "动态依赖:"
 $TOOLCHAIN/bin/llvm-readobj --needed-libs git || echo "(完全静态，0 动态依赖)"
+echo "TLS 对齐:"
+readelf -l git | grep -A1 TLS
 
 # 复制到输出目录
 mkdir -p /output

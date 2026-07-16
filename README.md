@@ -653,9 +653,9 @@ adb logcat -s PythonBridge PythonBridge-C
 
 ## 版本信息
 
-- **版本**: 2.4.6（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
+- **版本**: 2.4.7（commit 数 /100→大版本，余数/10→小版本，个位→补丁）
 - **Python**: 3.14.6 (官方 Android aarch64 构建)
-- **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB，以 libgit.so 打包)
+- **Git**: 2.46.0 (静态编译，内嵌 aarch64 二进制，4.2MB，以 libgit.so 打包，TLS 对齐 64)
 - **协议**: MCP (JSON-RPC 2.0 over HTTP)
 - **最低 Android**: API 24 (Android 7.0)
 - **目标 SDK**: API 32 (Android 12)
@@ -664,6 +664,12 @@ adb logcat -s PythonBridge PythonBridge-C
 - **UI 主题**: 冷色调色板 + 统一间距/圆角体系
 
 ### 更新日志
+
+**v2.4.7 — 修复 Android 14+ TLS 段对齐报错**
+- 根因：git 静态二进制的 PT_TLS 程序头 `p_align=8`，Android 14+ Bionic 要求至少 64，报 `executable's TLS segment is underaligned: alignment is 8, needs to be at least 64`（退出码 134 SIGABRT）
+- 修复：直接修改 ELF 程序头的 `p_align` 字段从 8 改为 64（OpenSSL 的 `__thread` 变量默认对齐不足）
+- `tools/build_static_git.sh` 新增 TLS 对齐修复步骤，未来重新编译自动应用
+- 同步更新 `jniLibs/arm64-v8a/libgit.so` 和 `assets/git/git`
 
 **v2.4.6 — 复合 shell 命令中的 git 调用支持**
 - 修复 `export ... && git clone ...` 等复合命令中 `git` 报 `inaccessible or not found`（退出码 127）
