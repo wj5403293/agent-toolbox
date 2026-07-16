@@ -2580,10 +2580,19 @@
                         if (cur.opts && cur.opts.length > 0) {
                             // 有选项时显示选项按钮 + 输入框 + 提交按钮
                             // （选项覆盖常见情况，输入框供自定义回答，提交按钮提交输入框内容）
-                            html += '<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">';
+                            // 过滤掉 LLM 返回的"其他"选项——下方已有输入框+提交按钮处理自定义回答，
+                            // 保留"其他"会与提交按钮语义重复
+                            var filteredOpts = [];
                             for (var oi = 0; oi < cur.opts.length; oi++) {
-                                var ov = escapeHtml(cur.opts[oi]);
-                                html += '<button type="button" class="ask-opt" data-val="' + ov + '" style="text-align:left; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + (oi+1) + '. ' + ov + '</button>';
+                                var rawOpt = String(cur.opts[oi]).trim();
+                                if (rawOpt.toLowerCase() !== '其他' && rawOpt.toLowerCase() !== 'other') {
+                                    filteredOpts.push(cur.opts[oi]);
+                                }
+                            }
+                            html += '<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">';
+                            for (var fi = 0; fi < filteredOpts.length; fi++) {
+                                var ov = escapeHtml(filteredOpts[fi]);
+                                html += '<button type="button" class="ask-opt" data-val="' + ov + '" style="text-align:left; padding:8px 12px; border-radius:8px; border:1px solid #fde68a; background:#fff; color:#92400e; font-size:13px; cursor:pointer;">' + (fi+1) + '. ' + ov + '</button>';
                             }
                             html += '</div>';
                             html += '<div style="display:flex; gap:6px; align-items:center;">';
