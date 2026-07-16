@@ -366,12 +366,65 @@ public class ShellTool implements Tool {
             }
             if (!result.stdout.isEmpty()) sb.append("\n").append(result.stdout);
             if (!result.stderr.isEmpty()) sb.append("\n[stderr]\n").append(result.stderr);
+            // git clone/fetch/push https:// 失败且包含 "remote helper" 时，附加诊断信息
+            if (result.exitCode != 0 && (result.stderr.contains("remote helper") || result.stdout.contains("remote helper"))) {
+                sb.append("\n--- git helper 诊断 ---\n");
+                sb.append(diagnoseGitHelper());
+            }
             return sb.toString();
         } catch (Exception e) {
             // git 二进制执行失败，回退到 dulwich
             sb.append("[git 二进制执行失败: ").append(e.getMessage()).append("，回退到 dulwich]\n");
             return executeGitDulwich(sb, gitArgs);
         }
+    }
+
+    /**
+     * 诊断 git-remote-https helper 的可用性，帮助定位 "unable to find remote helper" 问题。
+     */
+    private String diagnoseGitHelper() {
+        StringBuilder d = new StringBuilder();
+        try {
+            String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            java.io.File helperSo = new java.io.File(nativeLibDir, "libgitremotehttps.so");
+            d.append("nativeLibraryDir: ").append(nativeLibDir).append("\n");
+            d.append("libgitremotehttps.so: exists=").append(helperSo.exists())
+             .append(" canExec=").append(helperSo.canExecute()).append("\n");
+
+            java.io.File execDir = new java.io.File(context.getFilesDir(), "git-exec");
+            d.append("GIT_EXEC_PATH: ").append(execDir.getAbsolutePath()).append("\n");
+            d.append("execDir exists: ").append(execDir.exists()).append("\n");
+            if (execDir.exists()) {
+                java.io.File helperLink = new java.io.File(execDir, "git-remote-https");
+                d.append("git-remote-https link exists(File.exists): ").append(helperLink.exists()).append("\n");
+                try {
+                    String lt = android.system.Os.readlink(helperLink.getAbsolutePath());
+                    d.append("git-remote-https readlink: ").append(lt).append("\n");
+                    java.io.File ltFile = new java.io.File(lt);
+                    d.append("  target exists: ").append(ltFile.exists()).append("\n");
+                } catch (Exception e) {
+                    d.append("git-remote-https readlink 失败: ").append(e.getMessage()).append("\n");
+                }
+                // 列出 execDir 内容
+                d.append("execDir 内容:\n");
+                String[] files = execDir.list();
+                if (files != null) {
+                    for (String f : files) d.append("  ").append(f).append("\n");
+                }
+            }
+            // 列出 nativeLibraryDir 中的 git 相关 .so
+            d.append("nativeLibraryDir git 相关文件:\n");
+            java.io.File nld = new java.io.File(nativeLibDir);
+            String[] nldFiles = nld.list();
+            if (nldFiles != null) {
+                for (String f : nldFiles) {
+                    if (f.contains("git")) d.append("  ").append(f).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            d.append("诊断异常: ").append(e.getMessage()).append("\n");
+        }
+        return d.toString();
     }
 
     /**
@@ -460,24 +513,31 @@ public class ShellTool implements Tool {
     }
 
     /**
-     * 创建符号链接，如果已存在且指向正确则跳过
+     * 创建符号链接，如果已存在且指向正确则跳过。
+     * 关键: 不能用 File.exists() 判断链接是否存在——它对**断链**返回 false
+     * （断链 = 符号链接本身存在但目标已被删除）。app 更新后 nativeLibraryDir 路径
+     * 变化，旧符号链接变成断链，File.exists() 返回 false → 跳过删除 →
+     * Os.symlink() 因 EEXIST 失败 → 断链残留 → git 找不到 helper。
+     * 修复: 用 Os.readlink() 检测（对断链也能读取链接路径），无条件删除后再创建。
      */
     private void createSymlink(java.io.File target, java.io.File link) {
         try {
-            // 如果链接已存在且目标可执行，跳过
-            if (link.exists()) {
+            // 用 readlink 检测是否已是正确的符号链接（对断链也有效）
+            try {
                 String linkTarget = android.system.Os.readlink(link.getAbsolutePath());
                 if (linkTarget.equals(target.getAbsolutePath())) {
-                    return; // 已正确链接
+                    return; // 已正确链接（即使目标是断链也不需要改，路径相同）
                 }
-                // 删除旧链接
-                link.delete();
+            } catch (Exception ignored) {
+                // readlink 失败 = 不是符号链接或不存在，继续创建
             }
+            // 无条件删除已存在的文件/符号链接（File.delete 对断链也能 unlink）
+            link.delete();
+            try { android.system.Os.remove(link.getAbsolutePath()); } catch (Exception ignored) {}
+            // 创建新符号链接
             android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
         } catch (Exception e) {
-            // 符号链接创建失败（可能不支持），尝试复制文件
-            // 但 filesDir 中的文件 SELinux 不可执行，复制也没用
-            // 静默失败，git 会报 "unable to find remote helper"
+            // 符号链接创建失败（可能不支持），静默失败
         }
     }
 

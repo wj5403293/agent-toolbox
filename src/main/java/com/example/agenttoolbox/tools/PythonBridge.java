@@ -232,11 +232,13 @@ public class PythonBridge {
 
     private static void createGitSymlink(File target, File link) {
         try {
-            if (link.exists()) {
+            // 用 readlink 检测（对断链也有效），不用 File.exists()（对断链返回 false）
+            try {
                 String lt = android.system.Os.readlink(link.getAbsolutePath());
                 if (lt.equals(target.getAbsolutePath())) return;
-                link.delete();
-            }
+            } catch (Exception ignored) {}
+            link.delete();
+            try { android.system.Os.remove(link.getAbsolutePath()); } catch (Exception ignored) {}
             android.system.Os.symlink(target.getAbsolutePath(), link.getAbsolutePath());
         } catch (Exception ignored) {}
     }
