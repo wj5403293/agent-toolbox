@@ -128,6 +128,7 @@ cd "curl-${CURL_VERSION}"
     --enable-static \
     --with-openssl="$PREFIX" \
     --with-zlib="$PREFIX" \
+    --with-ca-bundle=/data/data/com.example.agenttoolbox/files/cacert.pem \
     --enable-ares="$PREFIX" \
     --disable-ldap --disable-ldaps --disable-rtsp \
     --disable-dict --disable-telnet --disable-pop3 \

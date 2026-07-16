@@ -146,6 +146,7 @@ public class ShellTool implements Tool {
                 String filesDir = context.getFilesDir().getAbsolutePath();
                 // 确保 CA 证书包就绪
                 String caBundle = ensureCacertBundle();
+                if (caBundle != null) ensureGitConfig(caBundle);
                 StringBuilder prefix = new StringBuilder();
                 // 注入环境变量
                 if (execPath != null) {
@@ -498,6 +499,10 @@ public class ShellTool implements Tool {
             if (caBundle != null) {
                 env.put("SSL_CERT_FILE", caBundle);
                 env.put("CURL_CA_BUNDLE", caBundle);
+                // 关键: 写 .gitconfig 设置 http.sslCAInfo。
+                // git 的 http.c 从配置读取 sslCAInfo 并通过 CURLOPT_CAINFO 直接传给 libcurl，
+                // 绕过所有环境变量检查路径（SSL_CERT_FILE / CURL_CA_BUNDLE 可能被跳过）。
+                ensureGitConfig(caBundle);
             } else {
                 // 回退到系统 CA 目录
                 env.put("SSL_CERT_DIR", "/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts");
@@ -542,6 +547,33 @@ public class ShellTool implements Tool {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 确保 .gitconfig 含 http.sslCAInfo 指向 cacert.pem。
+     * git 的 http.c 从配置读 sslCAInfo，通过 CURLOPT_CAINFO 直接传给 libcurl，
+     * 这是绕过 SSL_CERT_FILE / CURL_CA_BUNDLE 环境变量不可靠问题的最可靠方案。
+     * 追加 [http] section 到 .gitconfig 末尾（git 配置中同名 key 后者覆盖前者）。
+     */
+    private void ensureGitConfig(String caBundlePath) {
+        if (context == null || caBundlePath == null) return;
+        try {
+            java.io.File gitconfig = new java.io.File(context.getFilesDir(), ".gitconfig");
+            String targetLine = "sslCAInfo = " + caBundlePath;
+            String content = "";
+            if (gitconfig.exists()) {
+                try {
+                    content = new String(java.nio.file.Files.readAllBytes(gitconfig.toPath()), "UTF-8");
+                } catch (Exception ignored) {}
+            }
+            // 已设置正确则跳过
+            if (content.contains(targetLine)) return;
+            // 追加 [http] section（git 配置同名 key 后者覆盖前者，安全）
+            StringBuilder sb = new StringBuilder(content);
+            if (!content.isEmpty() && !content.endsWith("\n")) sb.append("\n");
+            sb.append("[http]\n\tsslCAInfo = ").append(caBundlePath).append("\n");
+            java.nio.file.Files.write(gitconfig.toPath(), sb.toString().getBytes("UTF-8"));
+        } catch (Exception ignored) {}
     }
 
     /**

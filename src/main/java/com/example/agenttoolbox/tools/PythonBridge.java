@@ -195,6 +195,8 @@ public class PythonBridge {
         if (caBundle != null) {
             sb.append("os.environ['SSL_CERT_FILE'] = ").append(repr(caBundle)).append("\n");
             sb.append("os.environ['CURL_CA_BUNDLE'] = ").append(repr(caBundle)).append("\n");
+            // 写 .gitconfig 设置 http.sslCAInfo（git http.c 通过 CURLOPT_CAINFO 直接传给 libcurl）
+            ensureGitConfig(context, caBundle);
         } else {
             sb.append("os.environ['SSL_CERT_DIR'] = '/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'\n");
         }
@@ -280,6 +282,30 @@ public class PythonBridge {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 确保 .gitconfig 含 http.sslCAInfo 指向 cacert.pem。
+     * git 的 http.c 从配置读 sslCAInfo 并通过 CURLOPT_CAINFO 直接传给 libcurl，
+     * 绕过 SSL_CERT_FILE / CURL_CA_BUNDLE 环境变量不可靠的问题。
+     */
+    private static void ensureGitConfig(Context context, String caBundlePath) {
+        if (context == null || caBundlePath == null) return;
+        try {
+            File gitconfig = new File(context.getFilesDir(), ".gitconfig");
+            String targetLine = "sslCAInfo = " + caBundlePath;
+            String content = "";
+            if (gitconfig.exists()) {
+                try {
+                    content = new String(java.nio.file.Files.readAllBytes(gitconfig.toPath()), "UTF-8");
+                } catch (Exception ignored) {}
+            }
+            if (content.contains(targetLine)) return;
+            StringBuilder sb = new StringBuilder(content);
+            if (!content.isEmpty() && !content.endsWith("\n")) sb.append("\n");
+            sb.append("[http]\n\tsslCAInfo = ").append(caBundlePath).append("\n");
+            java.nio.file.Files.write(gitconfig.toPath(), sb.toString().getBytes("UTF-8"));
+        } catch (Exception ignored) {}
     }
 
     /** 从 assets/git/git 提取到 filesDir/git_bin，返回可执行文件或 null */
