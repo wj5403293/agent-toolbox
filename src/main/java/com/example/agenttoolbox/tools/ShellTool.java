@@ -309,6 +309,14 @@ public class ShellTool implements Tool {
             return executeGitDulwich(sb, gitArgs);
         }
 
+        // reset --hard: 静态 git 二进制调 os.symlink 恢复符号链接，Android /sdcard
+        // 不支持 symlink → PermissionError。直接用 dulwich（cmd_reset 用
+        // _manual_checkout 把符号链接解析为普通文件）
+        if (gitArgs.startsWith("reset ") || gitArgs.equals("reset")) {
+            sb.append("[reset → dulwich (静态 git symlink 崩溃)]\n");
+            return executeGitDulwich(sb, gitArgs);
+        }
+
         // 第 1 层：系统 git 二进制
         String gitBin = findGitBinary();
         if (gitBin != null) {
@@ -1004,7 +1012,7 @@ public class ShellTool implements Tool {
         try {
             java.io.File outFile = new java.io.File(context.getFilesDir(), "git_bridge.py");
             java.io.File versionFile = new java.io.File(context.getFilesDir(), "git_bridge.version");
-            String currentVersion = "v2.4.33-clone-index-add";
+            String currentVersion = "v2.4.34-reset-hard-dulwich";
             // 版本检查: 防止旧版本缓存（v2.4.21 的 git_bridge.py 有语法错误，
             // 应用更新后 filesDir 中的旧文件不会自动替换）
             if (outFile.exists() && versionFile.exists()) {

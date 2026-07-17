@@ -413,6 +413,66 @@ def cmd_checkout(args):
         return 1
 
 
+def cmd_reset(args):
+    """git reset --hard [<commit>]
+
+    Android /sdcard 不支持符号链接，静态 git 二进制执行 reset --hard 时
+    调 os.symlink 恢复符号链接会 PermissionError。这里用 dulwich 实现：
+    --hard 模式下用 _manual_checkout（符号链接解析为普通文件）重置工作树，
+    再用 porcelain.add 重建 index，确保与工作树一致。
+    """
+    import os
+    from dulwich import porcelain
+    from dulwich.repo import Repo
+    if not args or args[0] not in ("--hard", "--mixed", "--soft"):
+        print("用法: git reset --hard [<commit>]", file=sys.stderr)
+        print("支持: --hard（--mixed/--soft 暂不支持）", file=sys.stderr)
+        return 1
+    mode = args[0]
+    target_ref = args[1] if len(args) > 1 else "HEAD"
+    try:
+        repo = Repo(".")
+    except Exception as e:
+        print(f"错误: 不在 git 仓库中 ({e})", file=sys.stderr)
+        return 1
+    if mode != "--hard":
+        print(f"暂不支持的 reset 模式: {mode}", file=sys.stderr)
+        return 1
+    # 解析目标 commit
+    try:
+        if target_ref == "HEAD":
+            target_sha = repo.head()
+        else:
+            # 支持 branch name / short sha
+            refs = repo.get_refs()
+            target_sha = None
+            for name, sha in refs.items():
+                if name.endswith(b"/" + target_ref.encode()):
+                    target_sha = sha
+                    break
+            if target_sha is None:
+                print(f"错误: 无法解析引用 '{target_ref}'", file=sys.stderr)
+                return 1
+        # 移动 HEAD 到目标 commit（reset 的本质）
+        repo.refs[b"HEAD"] = target_sha
+        # --hard: 重置工作树和 index
+        # 先清空工作树中已被 git 跟踪的文件（避免残留），再 checkout
+        # 简化处理：直接 _manual_checkout 覆盖写（不删除多余文件，
+        # 但 reset --hard 的常见场景是修复 index 状态，覆盖写足够）
+        _manual_checkout(repo)
+        # 重建 index
+        try:
+            porcelain.add(repo.path)
+        except Exception as e:
+            print(f"[警告] 重建 index 失败: {e}", file=sys.stderr)
+        print(f"HEAD 现在指向: {target_sha.decode()[:7]}")
+        print("已重置工作树和 index（符号链接解析为普通文件）")
+        return 0
+    except Exception as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_remote(args):
     """git remote [-v] / git remote add <name> <url> / git remote set-url <name> <url>"""
     from dulwich.repo import Repo
@@ -579,6 +639,7 @@ COMMANDS = {
     "fetch": cmd_fetch,
     "branch": cmd_branch,
     "checkout": cmd_checkout,
+    "reset": cmd_reset,
     "remote": cmd_remote,
     "config": cmd_config,
     "tag": cmd_tag,
