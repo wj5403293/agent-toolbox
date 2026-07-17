@@ -1128,7 +1128,8 @@ public class McpServer {
 
                                             // 如果回复是 JSON-RPC result 格式（文本回复），提取 result.content
                                             // 避免把整个 JSON-RPC 字符串当作显示内容
-                                            String displayReply = finalReply; // 发给前端显示的文本（默认=finalReply）
+                                            // 注意：含 plan_update / 待办计划的回复保留完整 JSON-RPC 发给前端，
+                                            // 前端 tryExtractJsonContent 会自行提取 result.content 渲染气泡
                                             if (!isToolCall && finalReply.length() > 0) {
                                                 try {
                                                     JSONObject parsed = extractJsonObject(finalReply);
@@ -1140,17 +1141,14 @@ public class McpServer {
                                                                 String extractedContent = resultJson.getString("content");
                                                                 if (extractedContent != null && !extractedContent.isEmpty()) {
                                                                     log("[LLM] result.content: " + extractedContent.length());
-                                                                    // 如果 content 是待办计划 JSON，保留外层 JSON-RPC 包装，
-                                                                    // 让主循环的 hasResult 分支正确检测 plan
+                                                                    // 含 plan_update 或待办计划 JSON 时保留完整 JSON-RPC，
+                                                                    // 前端 tryExtractJsonContent 提取 result.content 渲染
                                                                     if (extractedContent.trim().startsWith("{\"tasks\"")
                                                                         || resultJson.has("plan_update")) {
                                                                         log("[LLM] result.content 是计划 JSON 或含 plan_update，保留外层包装");
-                                                                        // finalReply 不变，保持完整的 JSON-RPC 消息（主循环用）
-                                                                        // 但发给前端的 displayReply 用提取出的纯文本 content
-                                                                        displayReply = extractedContent;
+                                                                        // finalReply 不变，保持完整的 JSON-RPC 消息
                                                                     } else {
                                                                         finalReply = extractedContent;
-                                                                        displayReply = extractedContent;
                                                                     }
                                                                 }
                                                             }
@@ -1160,7 +1158,6 @@ public class McpServer {
                                                             if (!extractedContent.isEmpty()) {
                                                                 log("[LLM] 提取result(string): " + extractedContent.length());
                                                                 finalReply = extractedContent;
-                                                                displayReply = extractedContent;
                                                             }
                                                         }
                                                     }
@@ -1179,7 +1176,7 @@ public class McpServer {
                                                 log("[LLM] 内容: " + logReply);
                                             }
                                             JSONObject j = new JSONObject();
-                                            j.put("content", displayReply);
+                                            j.put("content", finalReply);
                                             j.put("round", currentRound);
                                             j.put("isToolCall", isToolCall);
                                             j.put("canContinue", canContinue);
