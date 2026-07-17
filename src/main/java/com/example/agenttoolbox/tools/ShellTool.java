@@ -333,7 +333,9 @@ public class ShellTool implements Tool {
      */
     private boolean isHttpsGitCommand(String gitArgs) {
         if (gitArgs == null || gitArgs.isEmpty()) return false;
-        String lower = gitArgs.toLowerCase();
+        // 先剥离 -c key=value 选项（git -c http.sslVerify=false clone https://...）
+        String stripped = stripGitOptions(gitArgs);
+        String lower = stripped.toLowerCase().trim();
         // clone 明确带 https:// 或 http:// URL
         if (lower.startsWith("clone ") && (lower.contains("https://") || lower.contains("http://"))) {
             return true;
@@ -346,6 +348,48 @@ public class ShellTool implements Tool {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 剥离 git 的全局选项 (-c key=value, -C dir, --git-dir, --work-tree 等)
+     * 这些选项对 dulwich 无意义，且会干扰子命令识别
+     * @return 剥离选项后的命令（如 "clone https://..."）
+     */
+    private String stripGitOptions(String gitArgs) {
+        if (gitArgs == null) return "";
+        String[] parts = gitArgs.split("\\s+");
+        StringBuilder result = new StringBuilder();
+        int i = 0;
+        while (i < parts.length) {
+            String p = parts[i];
+            if (p.equals("-c") && i + 1 < parts.length) {
+                // -c key=value (跳过两个 token)
+                i += 2;
+                continue;
+            }
+            if (p.startsWith("-c") && p.length() > 2 && p.charAt(2) == '=') {
+                // -c=key=value
+                i += 1;
+                continue;
+            }
+            if ((p.equals("-C") || p.equals("--git-dir") || p.equals("--work-tree")) && i + 1 < parts.length) {
+                // 带参数的选项 (跳过两个 token)
+                i += 2;
+                continue;
+            }
+            if (p.startsWith("--")) {
+                // --bare, --depth=N 等长选项（保留，可能对 dulwich 有用）
+                // 但 --git-dir=X / --work-tree=X 形式跳过
+                if (p.startsWith("--git-dir=") || p.startsWith("--work-tree=")) {
+                    i += 1;
+                    continue;
+                }
+                // 其他 -- 选项保留给子命令处理
+            }
+            result.append(p).append(" ");
+            i++;
+        }
+        return result.toString().trim();
     }
 
     /**
@@ -959,10 +1003,20 @@ public class ShellTool implements Tool {
     private java.io.File extractGitBridge() {
         try {
             java.io.File outFile = new java.io.File(context.getFilesDir(), "git_bridge.py");
-            // 如果已存在且与 assets 大小一致则跳过（简单判断）
-            if (outFile.exists() && outFile.length() > 0) {
-                return outFile;
+            java.io.File versionFile = new java.io.File(context.getFilesDir(), "git_bridge.version");
+            String currentVersion = "v2.4.22-fix-docstring";
+            // 版本检查: 防止旧版本缓存（v2.4.21 的 git_bridge.py 有语法错误，
+            // 应用更新后 filesDir 中的旧文件不会自动替换）
+            if (outFile.exists() && versionFile.exists()) {
+                try {
+                    String cachedVersion = new String(
+                        java.nio.file.Files.readAllBytes(versionFile.toPath()), "UTF-8").trim();
+                    if (currentVersion.equals(cachedVersion) && outFile.length() > 0) {
+                        return outFile;
+                    }
+                } catch (Exception ignored) {}
             }
+            // 版本不匹配或文件不存在，重新提取
             android.content.res.AssetManager am = context.getAssets();
             java.io.InputStream is = am.open("python/git_bridge.py");
             try {
@@ -974,6 +1028,14 @@ public class ShellTool implements Tool {
                     fos.flush();
                 } finally { fos.close(); }
             } finally { is.close(); }
+            // 写入版本标记
+            try {
+                java.io.FileOutputStream vf = new java.io.FileOutputStream(versionFile);
+                try {
+                    vf.write(currentVersion.getBytes("UTF-8"));
+                    vf.flush();
+                } finally { vf.close(); }
+            } catch (Exception ignored) {}
             return outFile;
         } catch (Exception e) {
             e.printStackTrace();
