@@ -91,12 +91,14 @@ def cmd_clone(args):
     """git clone <url> [目录]
 
     Android /sdcard 等外部存储不支持符号链接（os.symlink → PermissionError），
-    而本仓库 src/main/AndroidManifest.xml 是符号链接。因此 clone 时关闭
-    自动 checkout，数据拉取完成后手动 checkout：把符号链接解析为目标文件
-    的真实内容写成普通文件，让仓库在外部存储上可用。
+    而本仓库 src/main/AndroidManifest.xml 是符号链接。clone 时关闭自动
+    checkout，数据拉取后用 build_index_from_tree + 自定义 symlink_fn 同时
+    构建 index 和 checkout：符号链接解析为目标文件真实内容写成普通文件。
+    index 正确构建后 git status 不会误报文件"已删除"。
     """
+    import os
     from dulwich import porcelain
-    from dulwich.repo import Repo
+    from dulwich.index import build_index_from_tree
     if not args:
         print("用法: git clone <url> [目录]", file=sys.stderr)
         return 1
@@ -109,64 +111,70 @@ def cmd_clone(args):
     except TypeError:
         # 老版本 dulwich 无 checkout 参数，回退到默认 clone
         repo = porcelain.clone(url, target)
+        dest = target or url.rstrip("/").split("/")[-1].replace(".git", "")
+        print(f"克隆完成: {dest}")
+        return 0
     dest = target or url.rstrip("/").split("/")[-1].replace(".git", "")
-    # 手动 checkout（符号链接解析为目标文件内容）
-    _manual_checkout(repo)
+    # 用 build_index_from_tree 同时构建 index 和 checkout 工作树
+    # 自定义 symlink_fn: Android /sdcard 不支持 os.symlink，把符号链接
+    # 解析为目标文件 blob 内容写成普通文件
+    try:
+        head = repo.head()
+        tree_id = repo[head].tree
+    except Exception:
+        # 空仓库，无需 checkout
+        print(f"克隆完成: {dest} (空仓库)")
+        return 0
+    symlink_fn = _make_symlink_fn(repo)
+    try:
+        build_index_from_tree(
+            root_path=repo.path,
+            index_path=os.path.join(repo.controldir(), "index"),
+            object_store=repo.object_store,
+            tree_id=tree_id,
+            symlink_fn=symlink_fn,
+        )
+    except TypeError:
+        # 老版本 build_index_from_tree 无 symlink_fn 参数，回退到手动 checkout
+        print("[警告] dulwich 版本过旧，无 symlink_fn 支持，回退手动 checkout", file=sys.stderr)
+        _manual_checkout(repo)
     print(f"克隆完成: {dest}")
     return 0
 
 
-def _manual_checkout(repo):
-    """手动 checkout 工作树。
+def _make_symlink_fn(repo):
+    """构造符号链接处理函数。
 
-    dulwich 默认 checkout 调用 os.symlink 创建符号链接，Android /sdcard
-    不支持 symlink 会 PermissionError。这里遍历 HEAD tree 写文件：
-    - 普通文件/可执行文件：直接写
-    - 符号链接（mode 0o120000）：解析链接目标，把目标文件 blob 内容
-      写成普通文件（目标不在仓库内则写链接路径字符串）
+    dulwich build_file_from_blob 对符号链接调用 symlink_fn(contents, target_path)：
+    - contents: 符号链接 blob 的 data，即链接目标路径（bytes），如 b'../../AndroidManifest.xml'
+    - target_path: 工作树中要创建的文件路径（string），绝对路径
+
+    Android /sdcard 不支持 os.symlink，这里把链接目标解析为仓库内目标文件
+    的 blob 内容，写成普通文件（目标不在仓库内则写链接路径字符串）。
     """
     import os
     from dulwich.objects import Tree, Blob
     try:
-        head = repo.head()
+        _head = repo.head()
+        _root_tree = repo[repo[_head].tree]
     except Exception:
-        # 空仓库
-        return
-    root_tree = repo[repo[head].tree]
-    _write_tree_recursive(repo, repo.path, root_tree, b"")
+        _root_tree = None
 
+    def symlink_fn(contents, target_path):
+        if _root_tree is None:
+            with open(target_path, "wb") as f:
+                f.write(contents)
+            return
+        link_target = contents.decode("utf-8", "replace")
+        # target_path 是绝对路径，转成仓库内相对路径用于解析链接
+        rel_path = os.path.relpath(target_path, repo.path).replace(os.sep, "/")
+        content = _resolve_symlink_target(repo, rel_path.encode("utf-8"), link_target)
+        if content is None:
+            content = contents
+        with open(target_path, "wb") as f:
+            f.write(content)
 
-def _write_tree_recursive(repo, base, tree, prefix):
-    """递归写出 tree 到 base 目录。prefix 是当前目录相对仓库根的路径（bytes）"""
-    import os
-    from dulwich.objects import Tree, Blob
-    for entry in tree.iteritems():
-        name = entry.path
-        path = os.path.join(base, name.decode())
-        full_path = prefix + name
-        obj = repo[entry.sha]
-        if isinstance(obj, Tree):
-            os.makedirs(path, exist_ok=True)
-            _write_tree_recursive(repo, path, obj, full_path + b"/")
-        elif isinstance(obj, Blob):
-            mode = entry.mode
-            if mode == 0o120000:
-                # 符号链接：解析目标文件内容
-                link_target = obj.data.decode("utf-8", "replace")
-                content = _resolve_symlink_target(repo, full_path, link_target)
-                if content is None:
-                    # 目标不在仓库内，写链接路径字符串作为普通文件
-                    content = obj.data
-                with open(path, "wb") as f:
-                    f.write(content)
-            else:
-                with open(path, "wb") as f:
-                    f.write(obj.data)
-                if mode & 0o100:
-                    try:
-                        os.chmod(path, 0o755)
-                    except OSError:
-                        pass
+    return symlink_fn
 
 
 def _resolve_symlink_target(repo, link_path_in_repo, link_target):
@@ -202,6 +210,54 @@ def _resolve_symlink_target(repo, link_path_in_repo, link_target):
             return None
         tree = obj
     return None
+
+
+def _manual_checkout(repo):
+    """手动 checkout 工作树（老版本 dulwich 无 symlink_fn 时的回退方案）。
+
+    注意：此回退方案只写工作树文件，不构建 index，git status 会误报
+    所有文件"已删除"。仅在不支持 build_index_from_tree symlink_fn 的
+    极老 dulwich 版本上使用。
+    """
+    import os
+    from dulwich.objects import Tree, Blob
+    try:
+        head = repo.head()
+    except Exception:
+        return
+    root_tree = repo[repo[head].tree]
+    _write_tree_recursive(repo, repo.path, root_tree, b"")
+
+
+def _write_tree_recursive(repo, base, tree, prefix):
+    """递归写出 tree 到 base 目录。prefix 是当前目录相对仓库根的路径（bytes）"""
+    import os
+    from dulwich.objects import Tree, Blob
+    for entry in tree.iteritems():
+        name = entry.path
+        path = os.path.join(base, name.decode())
+        full_path = prefix + name
+        obj = repo[entry.sha]
+        if isinstance(obj, Tree):
+            os.makedirs(path, exist_ok=True)
+            _write_tree_recursive(repo, path, obj, full_path + b"/")
+        elif isinstance(obj, Blob):
+            mode = entry.mode
+            if mode == 0o120000:
+                link_target = obj.data.decode("utf-8", "replace")
+                content = _resolve_symlink_target(repo, full_path, link_target)
+                if content is None:
+                    content = obj.data
+                with open(path, "wb") as f:
+                    f.write(content)
+            else:
+                with open(path, "wb") as f:
+                    f.write(obj.data)
+                if mode & 0o100:
+                    try:
+                        os.chmod(path, 0o755)
+                    except OSError:
+                        pass
 
 
 def cmd_add(args):
