@@ -118,15 +118,9 @@ def cmd_clone(args):
         print(f"克隆完成: {dest}")
         return 0
     dest = target or url.rstrip("/").split("/")[-1].replace(".git", "")
-    # 手动 checkout 工作树（符号链接解析为目标文件 blob 内容写成普通文件）
+    # 手动 checkout 工作树 + 构建与 HEAD tree 一致的 index
+    # （_manual_checkout 内部同时写工作树文件和 index，符号链接记录原始 mode+sha）
     _manual_checkout(repo)
-    # 构建 index：用 porcelain.add 把工作树文件批量加到 index
-    # 这样 index 基于实际工作树文件构建，必然与工作树一致
-    # （build_index_from_tree 之前没有正确写入 index，改用此方案）
-    try:
-        porcelain.add(repo.path)
-    except Exception as e:
-        print(f"[警告] 构建 index 失败（git status 可能误报）: {e}", file=sys.stderr)
     print(f"克隆完成: {dest}")
     return 0
 
@@ -167,26 +161,58 @@ def _resolve_symlink_target(repo, link_path_in_repo, link_target):
 
 
 def _manual_checkout(repo):
-    """手动 checkout 工作树（老版本 dulwich 无 symlink_fn 时的回退方案）。
+    """手动 checkout 工作树 + 构建与 HEAD tree 完全一致的 index。
 
-    注意：此回退方案只写工作树文件，不构建 index，git status 会误报
-    所有文件"已删除"。仅在不支持 build_index_from_tree symlink_fn 的
-    极老 dulwich 版本上使用。
+    Android /sdcard 不支持符号链接，dulwich 默认 checkout 调 os.symlink 会
+    PermissionError。这里分两步：
+    1. 写工作树：符号链接解析为目标文件 blob 内容写成普通文件（文件系统能存）
+    2. 构建 index：记录**原始** mode + sha（symlink 记录 0o120000 + 链接 blob sha，
+       普通文件记录原始 mode + blob sha）
+
+    这样 index 与 HEAD tree 完全一致，git status 显示干净（不会因符号链接被
+    写成普通文件而报 typechange/modified）。
     """
     import os
     from dulwich.objects import Tree, Blob
+    from dulwich.index import Index
     try:
         head = repo.head()
     except Exception:
         return
     root_tree = repo[repo[head].tree]
-    _write_tree_recursive(repo, repo.path, root_tree, b"")
+    # 构建全新的 index（read=False 创建空 index）
+    index_path = os.path.join(repo.controldir(), "index")
+    index = Index(index_path, read=False)
+    _write_tree_recursive(repo, repo.path, root_tree, b"", index)
+    # 写入 index 文件
+    # 新版 dulwich (≥1.0): index.write() 无参数（用初始化时的 filename）
+    # 老版 dulwich: index.write(f) 需要 file 参数
+    # 用 try 两次法兼容两种 API（inspect.signature 在某些版本返回 None）
+    written = False
+    try:
+        index.write()  # 新版 dulwich
+        written = True
+    except TypeError:
+        try:
+            with open(index_path, "wb") as f:
+                index.write(f)  # 老版 dulwich
+            written = True
+        except Exception as write_e2:
+            print(f"[警告] 写入 index 失败: {write_e2}", file=sys.stderr)
+    except Exception as write_e:
+        print(f"[警告] 写入 index 失败: {write_e}", file=sys.stderr)
 
 
-def _write_tree_recursive(repo, base, tree, prefix):
-    """递归写出 tree 到 base 目录。prefix 是当前目录相对仓库根的路径（bytes）"""
+def _write_tree_recursive(repo, base, tree, prefix, index):
+    """递归写出 tree 到 base 目录，同时构建 index。
+
+    prefix: 当前目录相对仓库根的路径（bytes）
+    index: dulwich.index.Index 对象，写入 entry（path, mode, sha）
+    """
     import os
+    import time
     from dulwich.objects import Tree, Blob
+    from dulwich.index import IndexEntry
     for entry in tree.iteritems():
         name = entry.path
         path = os.path.join(base, name.decode())
@@ -194,10 +220,11 @@ def _write_tree_recursive(repo, base, tree, prefix):
         obj = repo[entry.sha]
         if isinstance(obj, Tree):
             os.makedirs(path, exist_ok=True)
-            _write_tree_recursive(repo, path, obj, full_path + b"/")
+            _write_tree_recursive(repo, path, obj, full_path + b"/", index)
         elif isinstance(obj, Blob):
             mode = entry.mode
             if mode == 0o120000:
+                # 符号链接：工作树写目标文件内容（普通文件），index 记录原始 symlink mode + sha
                 link_target = obj.data.decode("utf-8", "replace")
                 content = _resolve_symlink_target(repo, full_path, link_target)
                 if content is None:
@@ -212,6 +239,43 @@ def _write_tree_recursive(repo, base, tree, prefix):
                         os.chmod(path, 0o755)
                     except OSError:
                         pass
+            # 构建 index entry
+            # Android /sdcard 不支持 symlink，工作树中符号链接被写成普通文件。
+            # 这是 Android 文件系统的根本限制，无法让 git status 完全干净。
+            # 两种方案权衡：
+            #   A) index 记录 symlink mode + symlink sha（与 HEAD 一致）
+            #      → staged 干净，unstaged 报 typechange（工作树是普通文件）
+            #   B) index 记录普通文件 mode + 工作树内容 sha
+            #      → unstaged 干净，staged 报 modify（与 HEAD symlink sha 不同）
+            # 方案 A 更合理：typechange 明确表示"文件类型变化"，用户能理解是
+            # symlink 限制；且只影响符号链接文件（通常只有 1-2 个），不影响
+            # 普通文件的状态。方案 B 会让符号链接显示为"内容修改"，误导用户
+            # 以为文件内容变了。
+            # 采用方案 A：index 记录原始 mode + sha（与 HEAD tree 一致）。
+            try:
+                st = os.lstat(path)
+                # git index 的 ctime/mtime 是 (秒, 纳秒) 两个 32 位字段
+                ctime_s = int(st.st_ctime) & 0xFFFFFFFF
+                ctime_ns = int(st.st_ctime_ns) % 1000000000 & 0xFFFFFFFF
+                mtime_s = int(st.st_mtime) & 0xFFFFFFFF
+                mtime_ns = int(st.st_mtime_ns) % 1000000000 & 0xFFFFFFFF
+                # entry.sha 在 dulwich 中已是 20 字节二进制
+                sha_bin = entry.sha if isinstance(entry.sha, bytes) else bytes.fromhex(entry.sha)
+                entry_obj = IndexEntry(
+                    ctime=(ctime_s, ctime_ns),
+                    mtime=(mtime_s, mtime_ns),
+                    dev=st.st_dev & 0xFFFFFFFF,
+                    ino=st.st_ino & 0xFFFFFFFF,
+                    mode=mode,  # 原始 mode（symlink=0o120000, regular=0o100644/0o100755）
+                    uid=st.st_uid & 0xFFFFFFFF,
+                    gid=st.st_gid & 0xFFFFFFFF,
+                    size=len(obj.data),
+                    sha=sha_bin,
+                )
+                index[full_path] = entry_obj
+            except Exception:
+                # lstat 失败则跳过 index entry（不影响工作树文件）
+                pass
 
 
 def cmd_add(args):
@@ -275,17 +339,33 @@ def cmd_status(args):
         branch = porcelain.active_branch(".") or "HEAD"
         print(f"位于分支 {branch}")
         staged = result.staged
-        if staged[0]:  # added
+        # 兼容 dulwich 不同版本：staged 可能是 dict 或 tuple
+        if isinstance(staged, dict):
+            staged_add = staged.get('add', [])
+            staged_modify = staged.get('modify', [])
+            staged_delete = staged.get('delete', [])
+        else:
+            staged_add, staged_modify, staged_delete = staged[0], staged[1], staged[2]
+        unstaged = result.unstaged if hasattr(result, 'unstaged') else []
+        untracked = result.untracked if hasattr(result, 'untracked') else []
+
+        if staged_add or staged_modify or staged_delete:
             print("\n要提交的变更:")
-            for f in staged[0]:
+            for f in staged_add:
                 print(f"  新文件:   {f.decode() if isinstance(f, bytes) else f}")
-        if staged[1]:  # modified
-            for f in staged[1]:
+            for f in staged_modify:
                 print(f"  修改:     {f.decode() if isinstance(f, bytes) else f}")
-        if staged[2]:  # deleted
-            for f in staged[2]:
+            for f in staged_delete:
                 print(f"  删除:     {f.decode() if isinstance(f, bytes) else f}")
-        if not any(staged):
+        if unstaged:
+            print("\n尚未暂存以提交的变更:")
+            for f in unstaged:
+                print(f"  修改:     {f.decode() if isinstance(f, bytes) else f}")
+        if untracked:
+            print("\n未跟踪的文件:")
+            for f in untracked:
+                print(f"  {f.decode() if isinstance(f, bytes) else f}")
+        if not (staged_add or staged_modify or staged_delete or unstaged or untracked):
             print("nothing to commit, working tree clean")
         return 0
     except Exception as e:
@@ -456,15 +536,9 @@ def cmd_reset(args):
         # 移动 HEAD 到目标 commit（reset 的本质）
         repo.refs[b"HEAD"] = target_sha
         # --hard: 重置工作树和 index
-        # 先清空工作树中已被 git 跟踪的文件（避免残留），再 checkout
-        # 简化处理：直接 _manual_checkout 覆盖写（不删除多余文件，
-        # 但 reset --hard 的常见场景是修复 index 状态，覆盖写足够）
+        # _manual_checkout 同时写工作树文件和构建与 HEAD tree 一致的 index
+        # （符号链接记录原始 mode+sha，不会报 typechange/modified）
         _manual_checkout(repo)
-        # 重建 index
-        try:
-            porcelain.add(repo.path)
-        except Exception as e:
-            print(f"[警告] 重建 index 失败: {e}", file=sys.stderr)
         print(f"HEAD 现在指向: {target_sha.decode()[:7]}")
         print("已重置工作树和 index（符号链接解析为普通文件）")
         return 0

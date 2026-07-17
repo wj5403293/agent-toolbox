@@ -1012,7 +1012,7 @@ public class ShellTool implements Tool {
         try {
             java.io.File outFile = new java.io.File(context.getFilesDir(), "git_bridge.py");
             java.io.File versionFile = new java.io.File(context.getFilesDir(), "git_bridge.version");
-            String currentVersion = "v2.4.34-reset-hard-dulwich";
+            String currentVersion = "v2.4.35-clone-index-from-tree";
             // 版本检查: 防止旧版本缓存（v2.4.21 的 git_bridge.py 有语法错误，
             // 应用更新后 filesDir 中的旧文件不会自动替换）
             if (outFile.exists() && versionFile.exists()) {
