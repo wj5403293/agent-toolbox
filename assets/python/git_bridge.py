@@ -92,13 +92,16 @@ def cmd_clone(args):
 
     Android /sdcard 等外部存储不支持符号链接（os.symlink → PermissionError），
     而本仓库 src/main/AndroidManifest.xml 是符号链接。clone 时关闭自动
-    checkout，数据拉取后用 build_index_from_tree + 自定义 symlink_fn 同时
-    构建 index 和 checkout：符号链接解析为目标文件真实内容写成普通文件。
-    index 正确构建后 git status 不会误报文件"已删除"。
+    checkout，手动 checkout 工作树（符号链接解析为目标文件 blob 内容写成
+    普通文件），然后用 porcelain.add 把工作树文件批量加到 index，确保
+    index 与工作树一致，git status 不会误报文件"已删除"。
+
+    之前用 build_index_from_tree 尝试同时构建 index + checkout，但实际
+    index 没有正确写入（git status 仍报"已删除并暂存"）。改用 porcelain.add
+    基于"已存在的工作树文件"构建 index，最可靠。
     """
     import os
     from dulwich import porcelain
-    from dulwich.index import build_index_from_tree
     if not args:
         print("用法: git clone <url> [目录]", file=sys.stderr)
         return 1
@@ -115,66 +118,17 @@ def cmd_clone(args):
         print(f"克隆完成: {dest}")
         return 0
     dest = target or url.rstrip("/").split("/")[-1].replace(".git", "")
-    # 用 build_index_from_tree 同时构建 index 和 checkout 工作树
-    # 自定义 symlink_fn: Android /sdcard 不支持 os.symlink，把符号链接
-    # 解析为目标文件 blob 内容写成普通文件
+    # 手动 checkout 工作树（符号链接解析为目标文件 blob 内容写成普通文件）
+    _manual_checkout(repo)
+    # 构建 index：用 porcelain.add 把工作树文件批量加到 index
+    # 这样 index 基于实际工作树文件构建，必然与工作树一致
+    # （build_index_from_tree 之前没有正确写入 index，改用此方案）
     try:
-        head = repo.head()
-        tree_id = repo[head].tree
-    except Exception:
-        # 空仓库，无需 checkout
-        print(f"克隆完成: {dest} (空仓库)")
-        return 0
-    symlink_fn = _make_symlink_fn(repo)
-    try:
-        build_index_from_tree(
-            root_path=repo.path,
-            index_path=os.path.join(repo.controldir(), "index"),
-            object_store=repo.object_store,
-            tree_id=tree_id,
-            symlink_fn=symlink_fn,
-        )
-    except TypeError:
-        # 老版本 build_index_from_tree 无 symlink_fn 参数，回退到手动 checkout
-        print("[警告] dulwich 版本过旧，无 symlink_fn 支持，回退手动 checkout", file=sys.stderr)
-        _manual_checkout(repo)
+        porcelain.add(repo.path)
+    except Exception as e:
+        print(f"[警告] 构建 index 失败（git status 可能误报）: {e}", file=sys.stderr)
     print(f"克隆完成: {dest}")
     return 0
-
-
-def _make_symlink_fn(repo):
-    """构造符号链接处理函数。
-
-    dulwich build_file_from_blob 对符号链接调用 symlink_fn(contents, target_path)：
-    - contents: 符号链接 blob 的 data，即链接目标路径（bytes），如 b'../../AndroidManifest.xml'
-    - target_path: 工作树中要创建的文件路径（string），绝对路径
-
-    Android /sdcard 不支持 os.symlink，这里把链接目标解析为仓库内目标文件
-    的 blob 内容，写成普通文件（目标不在仓库内则写链接路径字符串）。
-    """
-    import os
-    from dulwich.objects import Tree, Blob
-    try:
-        _head = repo.head()
-        _root_tree = repo[repo[_head].tree]
-    except Exception:
-        _root_tree = None
-
-    def symlink_fn(contents, target_path):
-        if _root_tree is None:
-            with open(target_path, "wb") as f:
-                f.write(contents)
-            return
-        link_target = contents.decode("utf-8", "replace")
-        # target_path 是绝对路径，转成仓库内相对路径用于解析链接
-        rel_path = os.path.relpath(target_path, repo.path).replace(os.sep, "/")
-        content = _resolve_symlink_target(repo, rel_path.encode("utf-8"), link_target)
-        if content is None:
-            content = contents
-        with open(target_path, "wb") as f:
-            f.write(content)
-
-    return symlink_fn
 
 
 def _resolve_symlink_target(repo, link_path_in_repo, link_target):
