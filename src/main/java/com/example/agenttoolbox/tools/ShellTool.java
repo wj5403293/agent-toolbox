@@ -144,8 +144,6 @@ public class ShellTool implements Tool {
                 // 确保 GIT_EXEC_PATH 就绪（含 git-remote-https 符号链接）
                 String execPath = ensureGitExecPath();
                 String filesDir = context.getFilesDir().getAbsolutePath();
-                // 删除旧 .gitconfig（v2.4.14 的 sslCAInfo 导致段错误）
-                cleanupGitConfig();
                 StringBuilder prefix = new StringBuilder();
                 // 注入环境变量
                 if (execPath != null) {
@@ -154,13 +152,15 @@ public class ShellTool implements Tool {
                 prefix.append("export HOME=").append(filesDir).append("; ");
                 prefix.append("export GIT_TEMPLATE_DIR=''; ");
                 prefix.append("export GIT_DNS_SERVERS='8.8.8.8,8.8.4.4,1.1.1.1'; ");
-                prefix.append("export GIT_SSL_NO_VERIFY=true; ");
-                // SSL_CERT_FILE + CURL_CA_BUNDLE: 指向内嵌 Mozilla CA 证书包，
-                // 防止静态 OpenSSL 走编译时默认路径(/tmp/static_prefix/ssl/certs/)导致段错误
+                // v2.4.13 证实: SSL_CERT_FILE + CURL_CA_BUNDLE 不崩溃（SSL 错误 exit 128）
+                // v2.4.14-17 加 GIT_SSL_NO_VERIFY 后段错误 exit 139
+                // 回退到 v2.4.13 配置: 只设 SSL_CERT_FILE + CURL_CA_BUNDLE，不设 GIT_SSL_NO_VERIFY
                 String caBundle = ensureCacertBundle();
                 if (caBundle != null) {
                     prefix.append("export SSL_CERT_FILE='").append(caBundle).append("'; ");
                     prefix.append("export CURL_CA_BUNDLE='").append(caBundle).append("'; ");
+                } else {
+                    prefix.append("export SSL_CERT_DIR='/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'; ");
                 }
                 // 注入 git 函数
                 prefix.append("git() { ").append(libGit.getAbsolutePath()).append(" \"$@\"; }; ");
@@ -491,18 +491,16 @@ public class ShellTool implements Tool {
             // c-ares DNS 服务器（Android 静态二进制的 getaddrinfo 不工作，
             // curl 编译时启用 c-ares，通过此环境变量设置 DNS 服务器）
             env.put("GIT_DNS_SERVERS", "8.8.8.8,8.8.4.4,1.1.1.1");
-            // SSL: v2.4.13 用 SSL_CERT_FILE + CURL_CA_BUNDLE 正常运行（SSL 错误但不崩溃），
-            // v2.4.14-16 移除这些后段错误。推断: 缺少 SSL_CERT_FILE 时 libcurl 尝试
-            // 编译时默认路径（/tmp/static_prefix/ssl/certs/，不存在），静态 OpenSSL 崩溃。
-            // 修复: 同时设置 SSL_CERT_FILE（指向已提取的 cacert.pem，防止默认路径崩溃）
-            // 和 GIT_SSL_NO_VERIFY=true（跳过验证，避免 CA 文件验证失败）。
-            // 不用 .gitconfig http.sslCAInfo（v2.4.14 证实会导致段错误）。
-            cleanupGitConfig();
-            env.put("GIT_SSL_NO_VERIFY", "true");
+            // v2.4.13 证实: SSL_CERT_FILE + CURL_CA_BUNDLE 不崩溃（SSL 错误 exit 128）
+            // v2.4.14-17 加 GIT_SSL_NO_VERIFY=true 后段错误 exit 139
+            // 回退到 v2.4.13 配置: 只设 SSL_CERT_FILE + CURL_CA_BUNDLE，不设 GIT_SSL_NO_VERIFY
             String caBundle = ensureCacertBundle();
             if (caBundle != null) {
                 env.put("SSL_CERT_FILE", caBundle);
                 env.put("CURL_CA_BUNDLE", caBundle);
+            } else {
+                // 回退到系统 CA 目录
+                env.put("SSL_CERT_DIR", "/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts");
             }
         } catch (Exception ignored) {}
         return env;

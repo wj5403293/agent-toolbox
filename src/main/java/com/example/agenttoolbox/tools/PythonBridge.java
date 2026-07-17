@@ -190,16 +190,15 @@ public class PythonBridge {
         sb.append("os.environ['GIT_TEMPLATE_DIR'] = ''\n");
         // c-ares DNS 服务器（Android 静态二进制的 getaddrinfo 不工作）
         sb.append("os.environ['GIT_DNS_SERVERS'] = '8.8.8.8,8.8.4.4,1.1.1.1'\n");
-        // SSL: 用 GIT_SSL_NO_VERIFY=true 跳过验证（静态 OpenSSL 加载 CA 文件段错误）
-        // 删除旧 .gitconfig 防止 v2.4.14 的 sslCAInfo 残留导致段错误
-        cleanupGitConfig(context);
-        sb.append("os.environ['GIT_SSL_NO_VERIFY'] = 'true'\n");
-        // SSL_CERT_FILE + CURL_CA_BUNDLE: 指向内嵌 Mozilla CA 证书包，
-        // 防止静态 OpenSSL 走编译时默认路径(/tmp/static_prefix/ssl/certs/)导致段错误
+        // v2.4.13 证实: SSL_CERT_FILE + CURL_CA_BUNDLE 不崩溃（SSL 错误 exit 128）
+        // v2.4.14-17 加 GIT_SSL_NO_VERIFY=true 后段错误 exit 139
+        // 回退到 v2.4.13 配置: 只设 SSL_CERT_FILE + CURL_CA_BUNDLE，不设 GIT_SSL_NO_VERIFY
         String caBundle = ensureCacertBundle(context);
         if (caBundle != null) {
             sb.append("os.environ['SSL_CERT_FILE'] = ").append(repr(caBundle)).append("\n");
             sb.append("os.environ['CURL_CA_BUNDLE'] = ").append(repr(caBundle)).append("\n");
+        } else {
+            sb.append("os.environ['SSL_CERT_DIR'] = '/system/etc/security/cacerts:/apex/com.android.conscrypt/cacerts'\n");
         }
         // 如果 'git' 名不存在但 libgit.so 存在，patch subprocess
         sb.append("if not os.path.exists(os.path.join(_d, 'git')):\n");
