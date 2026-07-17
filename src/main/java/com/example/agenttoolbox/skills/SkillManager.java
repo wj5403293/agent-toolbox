@@ -259,6 +259,12 @@ public class SkillManager {
             if (existing.fromAssets && !skill.fromAssets) {
                 // runtime 覆盖 assets：从 list 移除旧的，并移除其已注册的工具，
                 // 否则 registerSkillTools 会因工具名冲突跳过，导致工具仍是旧 assets 版本
+                // 健康检查：runtime skill 关键字段异常时不覆盖内置版本
+                // （常见于最小解析器不支持 YAML 块标量时 when_to_use 残留为 "|" 等）
+                if (isSkillMalformed(skill)) {
+                    AppLogger.w(TAG, "技能 " + skill.id + " runtime 版本解析异常(name/when_to_use)，保留内置版本");
+                    return;
+                }
                 skills.remove(existing);
                 if (!existing.tools.isEmpty()) {
                     java.util.Set<String> oldToolNames = new HashSet<>();
@@ -279,6 +285,20 @@ public class SkillManager {
         skills.add(skill);
         skillById.put(skill.id, skill);
         registerSkillTools(skill);
+    }
+
+    /**
+     * 检查 skill 是否解析异常（关键字段缺失或残留为 YAML 标记符）
+     * 用于防止坏掉的 runtime skill 覆盖正常的内置 skill
+     */
+    private boolean isSkillMalformed(Skill skill) {
+        if (skill == null) return true;
+        if (skill.name == null || skill.name.trim().isEmpty()) return true;
+        // when_to_use 残留为 YAML 块标量标记符（解析器不支持时出现的典型症状）
+        if ("|".equals(skill.whenToUse) || ">".equals(skill.whenToUse)) return true;
+        // description 为空也算异常（frontmatter 解析失败的特征）
+        if (skill.description == null || skill.description.trim().isEmpty()) return true;
+        return false;
     }
 
     private void registerSkillTools(Skill skill) {
@@ -373,12 +393,29 @@ public class SkillManager {
                 b.append(line).append("\n");
             }
         }
-        for (String fl : fmLines) {
+        for (int i = 0; i < fmLines.size(); i++) {
+            String fl = fmLines.get(i);
             int idx = fl.indexOf(':');
             if (idx < 0) continue;
             String k = fl.substring(0, idx).trim();
             String v = fl.substring(idx + 1).trim();
-            if ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))) {
+            // YAML 块标量: key: | 或 key: > — 后续缩进行为多行内容，直到非缩进行或 ---
+            if (v.equals("|") || v.equals(">")) {
+                StringBuilder block = new StringBuilder();
+                int j = i + 1;
+                while (j < fmLines.size()) {
+                    String bl = fmLines.get(j);
+                    // 块内行必须缩进（以空格开头）；空行允许
+                    if (bl.isEmpty() || bl.startsWith(" ") || bl.startsWith("\t")) {
+                        block.append(bl).append("\n");
+                        j++;
+                    } else {
+                        break;
+                    }
+                }
+                v = block.toString().trim();
+                i = j - 1; // 跳过已消费的行
+            } else if ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))) {
                 v = v.substring(1, v.length() - 1);
             }
             if (!k.isEmpty()) p.fm.put(k, v);
