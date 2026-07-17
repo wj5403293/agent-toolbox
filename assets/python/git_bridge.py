@@ -88,18 +88,120 @@ def cmd_init(args):
 
 
 def cmd_clone(args):
-    """git clone <url> [目录]"""
+    """git clone <url> [目录]
+
+    Android /sdcard 等外部存储不支持符号链接（os.symlink → PermissionError），
+    而本仓库 src/main/AndroidManifest.xml 是符号链接。因此 clone 时关闭
+    自动 checkout，数据拉取完成后手动 checkout：把符号链接解析为目标文件
+    的真实内容写成普通文件，让仓库在外部存储上可用。
+    """
     from dulwich import porcelain
+    from dulwich.repo import Repo
     if not args:
         print("用法: git clone <url> [目录]", file=sys.stderr)
         return 1
     url = args[0]
     target = args[1] if len(args) > 1 else None
     print(f"正在克隆 {url} ...")
-    porcelain.clone(url, target)
+    # checkout=False: 避免符号链接在 /sdcard 等不支持 symlink 的文件系统上失败
+    try:
+        repo = porcelain.clone(url, target, checkout=False)
+    except TypeError:
+        # 老版本 dulwich 无 checkout 参数，回退到默认 clone
+        repo = porcelain.clone(url, target)
     dest = target or url.rstrip("/").split("/")[-1].replace(".git", "")
+    # 手动 checkout（符号链接解析为目标文件内容）
+    _manual_checkout(repo)
     print(f"克隆完成: {dest}")
     return 0
+
+
+def _manual_checkout(repo):
+    """手动 checkout 工作树。
+
+    dulwich 默认 checkout 调用 os.symlink 创建符号链接，Android /sdcard
+    不支持 symlink 会 PermissionError。这里遍历 HEAD tree 写文件：
+    - 普通文件/可执行文件：直接写
+    - 符号链接（mode 0o120000）：解析链接目标，把目标文件 blob 内容
+      写成普通文件（目标不在仓库内则写链接路径字符串）
+    """
+    import os
+    from dulwich.objects import Tree, Blob
+    try:
+        head = repo.head()
+    except Exception:
+        # 空仓库
+        return
+    root_tree = repo[repo[head].tree]
+    _write_tree_recursive(repo, repo.path, root_tree, b"")
+
+
+def _write_tree_recursive(repo, base, tree, prefix):
+    """递归写出 tree 到 base 目录。prefix 是当前目录相对仓库根的路径（bytes）"""
+    import os
+    from dulwich.objects import Tree, Blob
+    for entry in tree.iteritems():
+        name = entry.path
+        path = os.path.join(base, name.decode())
+        full_path = prefix + name
+        obj = repo[entry.sha]
+        if isinstance(obj, Tree):
+            os.makedirs(path, exist_ok=True)
+            _write_tree_recursive(repo, path, obj, full_path + b"/")
+        elif isinstance(obj, Blob):
+            mode = entry.mode
+            if mode == 0o120000:
+                # 符号链接：解析目标文件内容
+                link_target = obj.data.decode("utf-8", "replace")
+                content = _resolve_symlink_target(repo, full_path, link_target)
+                if content is None:
+                    # 目标不在仓库内，写链接路径字符串作为普通文件
+                    content = obj.data
+                with open(path, "wb") as f:
+                    f.write(content)
+            else:
+                with open(path, "wb") as f:
+                    f.write(obj.data)
+                if mode & 0o100:
+                    try:
+                        os.chmod(path, 0o755)
+                    except OSError:
+                        pass
+
+
+def _resolve_symlink_target(repo, link_path_in_repo, link_target):
+    """解析符号链接，返回目标 blob 内容（bytes），目标不在仓库内返回 None。
+
+    link_path_in_repo: 符号链接在仓库内的路径（bytes），如 b'src/main/AndroidManifest.xml'
+    link_target: 链接目标字符串，如 '../../AndroidManifest.xml'
+    """
+    import os
+    from dulwich.objects import Tree, Blob
+    # 用 posixpath 风格解析（仓库内路径用 / 分隔）
+    link_dir = link_path_in_repo.rsplit(b"/", 1)[0] if b"/" in link_path_in_repo else b""
+    resolved = os.path.normpath(os.path.join(link_dir.decode("utf-8", "replace")
+                                             if link_dir else ".", link_target))
+    parts = [p for p in resolved.replace("\\", "/").split("/") if p and p != "."]
+    try:
+        head = repo.head()
+        tree = repo[repo[head].tree]
+    except Exception:
+        return None
+    for i, part in enumerate(parts):
+        entry = None
+        for e in tree.iteritems():
+            if e.path == part.encode("utf-8"):
+                entry = e
+                break
+        if entry is None:
+            return None
+        obj = repo[entry.sha]
+        if i == len(parts) - 1:
+            return obj.data if isinstance(obj, Blob) else None
+        if not isinstance(obj, Tree):
+            return None
+        tree = obj
+    return None
 
 
 def cmd_add(args):
