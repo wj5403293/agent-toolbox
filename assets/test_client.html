@@ -769,42 +769,49 @@
             background: #b9c4d4;
             cursor: not-allowed;
         }
-        /* 代理模式切换按钮 */
-        .input-area .agent-toggle {
+        /* 代理模式切换按钮独占一行 */
+        .agent-toggle-row {
+            display: flex;
+            justify-content: center;
+            padding: 8px 14px 0;
+            background: white;
+            border-top: 1px solid #eef2f6;
+            flex-shrink: 0;
+        }
+        .agent-toggle {
             background: #f1f5f9;
             border: 1px solid #d1d9e6;
             border-radius: 40px;
-            padding: 8px 14px;
+            padding: 7px 18px;
             font-size: 13px;
             font-weight: 500;
             color: #475569;
             cursor: pointer;
             transition: 0.18s;
-            height: 44px;
-            display: flex;
+            height: 34px;
+            display: inline-flex;
             align-items: center;
             gap: 6px;
-            flex-shrink: 0;
             user-select: none;
         }
-        .input-area .agent-toggle:hover {
+        .agent-toggle:hover {
             border-color: #3b82f6;
             color: #1e293b;
         }
-        .input-area .agent-toggle.active {
+        .agent-toggle.active {
             background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
             border-color: transparent;
             color: #fff;
             box-shadow: 0 2px 8px rgba(99, 102, 241, 0.32);
         }
-        .input-area .agent-toggle .agent-dot {
+        .agent-toggle .agent-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background: #94a3b8;
             transition: 0.18s;
         }
-        .input-area .agent-toggle.active .agent-dot {
+        .agent-toggle.active .agent-dot {
             background: #fde047;
             box-shadow: 0 0 6px #fde047;
         }
@@ -1457,11 +1464,15 @@
                     <div class="agent-status-right" id="agentStatusHint">AI 将自主推进任务直至完成或阻塞</div>
                 </div>
 
-                <div class="input-area">
+                <!-- 代理模式切换按钮独占一行 -->
+                <div class="agent-toggle-row">
                     <button class="agent-toggle" id="agentToggle" onclick="toggleAgentMode()" title="切换代理模式：开启后 AI 将自主拆解并连续执行任务，无需逐步确认">
                         <span class="agent-dot"></span>
-                        <span id="agentToggleLabel">代理模式</span>
+                        <span>代理模式</span>
                     </button>
+                </div>
+
+                <div class="input-area">
                     <textarea id="chatInput" placeholder="输入消息…" rows="1" onkeydown="handleKeyDown(event)"></textarea>
                     <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
                 </div>
@@ -3103,17 +3114,14 @@
         function toggleAgentMode() {
             autoMode = !autoMode;
             const btn = document.getElementById('agentToggle');
-            const label = document.getElementById('agentToggleLabel');
             const bar = document.getElementById('agentStatusBar');
             if (autoMode) {
                 btn.classList.add('active');
-                label.textContent = '代理模式 · 开';
                 bar.classList.add('show');
                 chatInput.placeholder = '代理模式：输入目标，AI 将自主拆解并连续执行所有任务…';
                 addSystemMessage('已开启代理模式。AI 将自主推进任务，无需逐步确认；遇到必须决策的情况会通过 ask 工具询问。');
             } else {
                 btn.classList.remove('active');
-                label.textContent = '代理模式';
                 bar.classList.remove('show');
                 chatInput.placeholder = '输入消息…';
                 addSystemMessage('已关闭代理模式，恢复手动确认。');
