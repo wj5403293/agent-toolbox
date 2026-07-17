@@ -125,7 +125,7 @@ def cmd_add(args):
 
 
 def cmd_commit(args):
-    """git commit -m "message""""
+    """git commit -m 'message'"""
     from dulwich import porcelain
     message = ""
     i = 0
