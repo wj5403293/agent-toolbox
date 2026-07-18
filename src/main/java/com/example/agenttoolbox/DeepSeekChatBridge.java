@@ -552,10 +552,20 @@ public class DeepSeekChatBridge {
             "  // 提取深度思考内容并通过 Android 桥接回调传出\n" +
             "  // 思考内容在 .ds-think-content 内，用时从 span 文本解析\n" +
             "  // 触发时机：pollOnce 检测到最终回复出现时调用\n" +
-            "  function sendThinkCallback() {\n" +
+            "  function sendThinkCallback(lastAiEl) {\n" +
             "    // 提取思考内容：.ds-think-content 内的 p.ds-markdown-paragraph\n" +
-            "    var thinkText = '';\n" +
-            "    var thinkContainer = document.querySelector('.ds-think-content');\n" +
+            "    // 关键修复：把思考内容/用时的查找限定在【当前轮】AI 消息块内，
+    // 不能再用 document.querySelector('.ds-think-content')（会取到全局第一个 =
+    // 上一条/历史消息的思考块，造成"思考内容是上一条的"问题）。
+    // 当前轮 = 最后一个 .ds-assistant-message-main-content，向上定位其 .ds-message 根容器
+    var scope = lastAiEl;
+    while (scope && scope.parentElement &&
+           !(scope.classList && scope.classList.contains('ds-message'))) {
+      scope = scope.parentElement;
+    }
+    scope = scope || lastAiEl;
+    var thinkText = '';\n" +
+            "    var thinkContainer = scope.querySelector('.ds-think-content');\n" +
             "    if (thinkContainer) {\n" +
             "      var blocks = thinkContainer.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
             "      if (blocks.length > 0) {\n" +
@@ -574,7 +584,7 @@ public class DeepSeekChatBridge {
             "    // 解析用时：查找 \"已思考（用时 N 秒）\" 文本\n" +
             "    var durationSec = 0;\n" +
             "    try {\n" +
-            "      var spans = document.querySelectorAll('span');\n" +
+            "      var spans = scope.querySelectorAll('span');\n" +
             "      for (var si = 0; si < spans.length; si++) {\n" +
             "        var stxt = (spans[si].textContent || '').trim();\n" +
             "        var m = stxt.match(/已思考[（(]\\s*用时\\s*(\\d+)\\s*秒\\s*[）)]/);\n" +
@@ -748,7 +758,7 @@ public class DeepSeekChatBridge {
             "    // 深度思考：检测到最终回复出现时，触发一次 think 回调（思考内容 + 用时）\n" +
             "    if (__deepThink && !__thinkSent && rawText && rawText.length >= 2) {\n" +
             "      __thinkSent = true;\n" +
-            "      try { sendThinkCallback(); } catch(e) { Android.log('[JS] sendThink 异常: ' + e); }\n" +
+            "      try { sendThinkCallback(lastAi); } catch(e) { Android.log('[JS] sendThink 异常: ' + e); }\n" +
             "    }\n" +
             "\n" +
             "    // 提取文本：从 p.ds-markdown-paragraph / pre 抓取，遍历 span/code 子节点保留原始内容\n" +
