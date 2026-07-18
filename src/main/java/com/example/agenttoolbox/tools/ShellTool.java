@@ -127,12 +127,64 @@ public class ShellTool implements Tool {
             sb.append("\n[stderr]\n").append(result.stderr);
         }
 
+        // am start 失败回退: Android 10+ shell 用户启动其他 app 的 Activity 会被拒绝
+        // (Permission Denial: package=com.android.shell does not belong to uid=xxxxx)
+        // 回退到 monkey -p <pkg> 1，monkey 用不同机制启动，不受此限制
+        if (result.exitCode != 0 && !result.timedOut
+                && isAmStartCommand(trimmed)
+                && (result.stderr.contains("Permission Denial")
+                    || result.stderr.contains("does not belong to uid"))) {
+            String pkg = extractPackageNameFromAmStart(trimmed);
+            if (pkg != null) {
+                sb.append("\n[am start 被 Android 安全策略拒绝，回退到 monkey 启动]\n");
+                ProcessRunner.Result monkeyResult =
+                    ProcessRunner.execShell("monkey -p " + pkg + " 1", timeout);
+                sb.append("$ monkey -p ").append(pkg).append(" 1\n");
+                sb.append("退出码: ").append(monkeyResult.exitCode).append("\n");
+                if (!monkeyResult.stdout.isEmpty()) sb.append("\n").append(monkeyResult.stdout);
+                if (!monkeyResult.stderr.isEmpty())
+                    sb.append("\n[stderr]\n").append(monkeyResult.stderr);
+                if (monkeyResult.exitCode == 0) {
+                    sb.append("\n已通过 monkey 成功启动 ").append(pkg);
+                }
+                return sb.toString();
+            }
+        }
+
         // 失败时附加简要诊断提示
         if (result.exitCode != 0 && !result.timedOut) {
             sb.append("\n提示: 命令失败。注意：Python 请直接用 python 工具执行，不要用 shell 调用");
         }
 
         return sb.toString();
+    }
+
+    /** 判断是否为 am start -n pkg/Activity 形式的命令 */
+    private boolean isAmStartCommand(String cmd) {
+        return cmd != null && cmd.startsWith("am start") && cmd.contains(" -n ");
+    }
+
+    /** 从 am start -n pkg/Activity 中提取包名 */
+    private String extractPackageNameFromAmStart(String cmd) {
+        if (cmd == null) return null;
+        int idx = cmd.indexOf(" -n ");
+        if (idx < 0) return null;
+        String rest = cmd.substring(idx + 4).trim();
+        // 去掉可能的引号
+        char first = rest.isEmpty() ? 0 : rest.charAt(0);
+        if ((first == '"' || first == '\'') && rest.length() > 1) {
+            int close = rest.indexOf(first, 1);
+            if (close > 1) rest = rest.substring(1, close);
+        }
+        // 取第一个空白前的 token（可能是 pkg/Activity 或 pkg）
+        int space = -1;
+        for (int i = 0; i < rest.length(); i++) {
+            if (Character.isWhitespace(rest.charAt(i))) { space = i; break; }
+        }
+        String token = space > 0 ? rest.substring(0, space) : rest;
+        // pkg/Activity → 取 pkg
+        int slash = token.indexOf('/');
+        return slash > 0 ? token.substring(0, slash) : token;
     }
 
     /**
