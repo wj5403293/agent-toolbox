@@ -145,6 +145,8 @@ public class DeepSeekChatBridge {
         public abstract void onChunk(String chunk);
         public abstract void onDone(String reply);
         public abstract void onError(String error);
+        /** 深度思考内容回调：thinkText 为思考过程文本，durationSec 为思考用时（秒，0 表示未知） */
+        public void onThink(String thinkText, int durationSec) {}
     }
 
     /**
@@ -323,6 +325,18 @@ public class DeepSeekChatBridge {
         }
     }
 
+    /**
+     * 由 JS 桥接调用：深度思考内容捕获（思考过程文本 + 用时）。
+     * observer 在检测到 <hr> 分界后，提取 <hr> 之前的思考内容并调用此方法。
+     */
+    public void onDeepSeekThink(String requestId, String thinkText, int durationSec) {
+        if (requestId == null) return;
+        StreamCallback cb = callbacksById.get(requestId);
+        if (cb != null && thinkText != null && !thinkText.isEmpty()) {
+            try { cb.onThink(thinkText, durationSec); } catch (Exception ignored) {}
+        }
+    }
+
     private void injectChatScript(final WebView webView,
                                    final String requestId,
                                    final String message) {
@@ -429,6 +443,7 @@ public class DeepSeekChatBridge {
             "  //   1. 深度思考模式：若存在 <hr>，只取 <hr> 之后的内容（最终回复）\n" +
             "  //   2. 深度思考模式且无 <hr>：说明还在思考阶段，返回空等最终回复出现\n" +
             "  //   3. 非深度思考：原逻辑（抓取所有 p.ds-markdown-paragraph / pre）\n" +
+            "  var __thinkSent = false;  // 思考内容是否已回调（每个 requestId 只发一次）\n" +
             "  function extractReply(el) {\n" +
             "    if (!el) return '';\n" +
             "    // 深度思考：用 <hr> 分界，取最终回复（hr 之后）\n" +
@@ -437,6 +452,11 @@ public class DeepSeekChatBridge {
             "      if (hrs.length === 0) {\n" +
             "        // 还在思考阶段（思考内容正在生成，最终回复尚未出现）\n" +
             "        return '';\n" +
+            "      }\n" +
+            "      // 思考已完成，触发一次 think 回调（<hr> 之前的内容 + 用时）\n" +
+            "      if (!__thinkSent) {\n" +
+            "        __thinkSent = true;\n" +
+            "        try { sendThinkCallback(el, hrs[0]); } catch(e) { Android.log('[JS] sendThink 异常: ' + e); }\n" +
             "      }\n" +
             "      // 取最后一个 hr 之后的内容（防止最终回复中也出现 hr）\n" +
             "      var lastHr = hrs[hrs.length - 1];\n" +
@@ -474,6 +494,38 @@ public class DeepSeekChatBridge {
             "      if (txt.trim()) out.push(txt.trim());\n" +
             "    }\n" +
             "    return out.join('\\n');\n" +
+            "  }\n" +
+            "\n" +
+            "  // 提取 <hr> 之前的思考内容并通过 Android 桥接回调传出\n" +
+            "  // 同时解析 \"已思考（用时 N 秒）\" 获取用时\n" +
+            "  function sendThinkCallback(el, firstHr) {\n" +
+            "    // 提取思考内容：第一个 <hr> 之前的所有兄弟元素文本\n" +
+            "    var thinkParts = [];\n" +
+            "    var n = el.firstElementChild;\n" +
+            "    while (n && n !== firstHr) {\n" +
+            "      var t = '';\n" +
+            "      if (n.tagName === 'P' || n.tagName === 'PRE') {\n" +
+            "        var kids = n.childNodes;\n" +
+            "        for (var i = 0; i < kids.length; i++) t += (kids[i].textContent || '');\n" +
+            "      } else {\n" +
+            "        t = (n.textContent || '').trim();\n" +
+            "      }\n" +
+            "      if (t.trim()) thinkParts.push(t.trim());\n" +
+            "      n = n.nextElementSibling;\n" +
+            "    }\n" +
+            "    var thinkText = thinkParts.join('\\n');\n" +
+            "    // 解析用时：查找页面上的 \"已思考（用时 N 秒）\" 文本\n" +
+            "    var durationSec = 0;\n" +
+            "    try {\n" +
+            "      var spans = document.querySelectorAll('span');\n" +
+            "      for (var si = 0; si < spans.length; si++) {\n" +
+            "        var stxt = (spans[si].textContent || '').trim();\n" +
+            "        var m = stxt.match(/已思考[（(]\\s*用时\\s*(\\d+)\\s*秒\\s*[）)]/);\n" +
+            "        if (m) { durationSec = parseInt(m[1], 10) || 0; break; }\n" +
+            "      }\n" +
+            "    } catch(e) {}\n" +
+            "    Android.log('[JS] 思考内容捕获: 长度=' + thinkText.length + ', 用时=' + durationSec + '秒');\n" +
+            "    Android.onDeepSeekThink(__rid, thinkText, durationSec);\n" +
             "  }\n" +
             "\n" +
             "  // 解析 JSON-RPC 并提取内容\n" +

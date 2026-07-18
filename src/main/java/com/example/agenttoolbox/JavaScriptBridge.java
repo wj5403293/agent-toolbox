@@ -151,6 +151,22 @@ public class JavaScriptBridge {
     }
 
     /**
+     * JS 调用：深度思考内容捕获
+     * @param requestId 请求 ID
+     * @param thinkText 思考过程文本
+     * @param durationSec 思考用时（秒），0 表示未知
+     */
+    @JavascriptInterface
+    public void onDeepSeekThink(final String requestId, final String thinkText, final int durationSec) {
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                DeepSeekChatBridge.getInstance().onDeepSeekThink(requestId, thinkText, durationSec);
+            }
+        });
+    }
+
+    /**
      * JS 调用：日志输出
      */
     @JavascriptInterface

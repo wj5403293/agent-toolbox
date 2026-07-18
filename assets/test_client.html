@@ -782,23 +782,19 @@
             background: #b9c4d4;
             cursor: not-allowed;
         }
-        /* 深度思考切换按钮（输入框左侧，彩色交叉椭圆外圆图标，仿设计稿） */
+        /* 深度思考切换按钮（输入框左侧，单色交叉椭圆外圆图标，仿设计稿） */
         .think-btn {
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            border: 2px solid transparent;
-            background-image: linear-gradient(#fff, #fff),
-                linear-gradient(45deg, #ff3333, #ffcc00, #33cc33, #0099ff, #6633ff, #ff3333);
-            background-origin: border-box;
-            background-clip: content-box, border-box;
+            border: 2px solid #222;
             position: relative;
             cursor: pointer;
             flex-shrink: 0;
             padding: 0;
-            opacity: 0.35;
-            filter: grayscale(0.6);
-            transition: opacity 0.2s, filter 0.2s, box-shadow 0.2s, transform 0.1s;
+            background: #fff;
+            opacity: 0.3;
+            transition: opacity 0.2s, box-shadow 0.2s, transform 0.1s;
         }
         .think-btn:hover {
             opacity: 0.6;
@@ -808,8 +804,7 @@
         }
         .think-btn.active {
             opacity: 1;
-            filter: none;
-            box-shadow: 0 0 0 3px rgba(0, 153, 255, 0.15);
+            box-shadow: 0 0 0 3px rgba(34, 34, 34, 0.12);
         }
         .think-btn .think-inner {
             position: absolute;
@@ -821,25 +816,94 @@
             position: absolute;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            border-style: solid;
+            border: 2px solid #222;
             border-radius: 50%;
-            border-width: 2px;
         }
         .think-btn .think-ellipse-h {
             width: 30px; height: 13px;
-            border-color: #0066ff #9900ff #0066ff #9900ff;
         }
         .think-btn .think-ellipse-v {
             width: 13px; height: 30px;
-            border-color: #ff3333 #ffcc00 #ff3333 #ffcc00;
         }
         .think-btn .think-dot {
             position: absolute;
             width: 4px; height: 4px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff);
+            background: #222;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
+        }
+        /* 深度思考内容卡片（可折叠） */
+        .think-card {
+            margin-top: 8px;
+            margin-bottom: 10px;
+            border-radius: 12px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .think-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            cursor: pointer;
+            user-select: none;
+            color: #475569;
+            background: #f1f5f9;
+            transition: background 0.15s;
+        }
+        .think-card-header:hover {
+            background: #e9eef4;
+        }
+        .think-card-icon {
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            border: 1.5px solid #222;
+            position: relative;
+            flex-shrink: 0;
+            transform: rotate(45deg);
+        }
+        .think-card-icon::before, .think-card-icon::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1.5px solid #222;
+            border-radius: 50%;
+        }
+        .think-card-icon::before { width: 10px; height: 4px; }
+        .think-card-icon::after  { width: 4px; height: 10px; }
+        .think-card-title {
+            font-weight: 500;
+            color: #0f172a;
+        }
+        .think-card-duration {
+            color: #64748b;
+            font-size: 12px;
+        }
+        .think-card-toggle {
+            margin-left: auto;
+            color: #94a3b8;
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+        .think-card.collapsed .think-card-toggle {
+            transform: rotate(-90deg);
+        }
+        .think-card-body {
+            padding: 10px 14px;
+            color: #475569;
+            max-height: 400px;
+            overflow-y: auto;
+            transition: max-height 0.2s, padding 0.2s;
+        }
+        .think-card.collapsed .think-card-body {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            overflow: hidden;
         }
         /* 代理模式切换按钮（放在头部 status-group 中，尺寸与 .status-badge 一致） */
         .agent-toggle {
@@ -3470,6 +3534,57 @@
                                 cardEl.setAttribute('data-ask-conv', askConvId);
                             }
                             setState('等待用户回答');
+                        }
+                    } else if (eventName === 'think') {
+                        // 深度思考事件：渲染可折叠思考内容卡片（图标 + "已思考（用时 N 秒）"）
+                        if (obj && typeof obj.content === 'string') {
+                            const thinkText = obj.content;
+                            const durationSec = (typeof obj.duration === 'number') ? obj.duration : 0;
+                            const thinkRound = (obj.round) ? obj.round : currentRound;
+                            // 轮次切换：think 事件归属的本轮与当前不一致时切换
+                            if (thinkRound !== currentRound) {
+                                switchRound(thinkRound);
+                            }
+                            // 找到当前活跃 bubble 所属的 server 消息，插入 think 卡片（文字 bubble 之前）
+                            let hostMsg = null;
+                            let node = activeBubbleEl;
+                            while (node && node !== chatMessages) {
+                                if (node.classList && node.classList.contains('message') && node.classList.contains('server')) {
+                                    hostMsg = node;
+                                    break;
+                                }
+                                node = node.parentNode;
+                            }
+                            if (hostMsg) {
+                                const contentEl = hostMsg.querySelector('.message-content');
+                                if (contentEl) {
+                                    // 同一 bubble 已有 think 卡片则不重复插入
+                                    if (!contentEl.querySelector('.think-card')) {
+                                        const card = document.createElement('div');
+                                        card.className = 'think-card collapsed'; // 默认折叠
+                                        const durationText = durationSec > 0
+                                            ? '已思考（用时 ' + durationSec + ' 秒）'
+                                            : '已思考';
+                                        card.innerHTML =
+                                            '<div class="think-card-header">' +
+                                                '<div class="think-card-icon"></div>' +
+                                                '<span class="think-card-title">深度思考</span>' +
+                                                '<span class="think-card-duration">' + escapeHtml(durationText) + '</span>' +
+                                                '<span class="think-card-toggle">▼</span>' +
+                                            '</div>' +
+                                            '<div class="think-card-body"><div class="md-body">' + renderMarkdown(thinkText) + '</div></div>';
+                                        // 点击 header 切换折叠
+                                        card.querySelector('.think-card-header').addEventListener('click', function() {
+                                            card.classList.toggle('collapsed');
+                                        });
+                                        const bubbleEl = contentEl.querySelector('.message-bubble');
+                                        if (bubbleEl) contentEl.insertBefore(card, bubbleEl);
+                                        else contentEl.appendChild(card);
+                                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                                    }
+                                }
+                            }
+                            console.log('[SSE] think事件: 长度=' + thinkText.length + ' 用时=' + durationSec + '秒');
                         }
                     } else if (eventName === 'retrying') {
                         setState('重试中');

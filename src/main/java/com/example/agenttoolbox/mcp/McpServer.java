@@ -1217,6 +1217,21 @@ public class McpServer {
                                     }
 
                                     @Override
+                                    public void onThink(String thinkText, int durationSec) {
+                                        try {
+                                            log("[LLM] onThink: 长度=" + (thinkText == null ? 0 : thinkText.length())
+                                                + " 用时=" + durationSec + "秒");
+                                            JSONObject j = new JSONObject();
+                                            j.put("content", thinkText == null ? "" : thinkText);
+                                            j.put("duration", durationSec);
+                                            j.put("round", currentRound);
+                                            writeEventChunk(out, "think", j.toString());
+                                        } catch (Exception e) {
+                                            log("[LLM] onThink异常: " + e.getMessage());
+                                        }
+                                    }
+
+                                    @Override
                                     public void onError(String error) {
                                         try {
                                             roundErrorRef.set(error);
