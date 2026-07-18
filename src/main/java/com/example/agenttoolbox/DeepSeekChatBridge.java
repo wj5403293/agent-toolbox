@@ -552,48 +552,45 @@ public class DeepSeekChatBridge {
             "  // 提取深度思考内容并通过 Android 桥接回调传出\n" +
             "  // 思考内容在 .ds-think-content 内，用时从 span 文本解析\n" +
             "  // 触发时机：pollOnce 检测到最终回复出现时调用\n" +
-            "  function sendThinkCallback(lastAiEl) {\n" +
-            "    // 提取思考内容：.ds-think-content 内的 p.ds-markdown-paragraph\n" +
-            "    // 关键修复：把思考内容/用时的查找限定在【当前轮】AI 消息块内，
-    // 不能再用 document.querySelector('.ds-think-content')（会取到全局第一个 =
-    // 上一条/历史消息的思考块，造成"思考内容是上一条的"问题）。
-    // 当前轮 = 最后一个 .ds-assistant-message-main-content，向上定位其 .ds-message 根容器
-    var scope = lastAiEl;
-    while (scope && scope.parentElement &&
-           !(scope.classList && scope.classList.contains('ds-message'))) {
-      scope = scope.parentElement;
-    }
-    scope = scope || lastAiEl;
-    var thinkText = '';\n" +
-            "    var thinkContainer = scope.querySelector('.ds-think-content');\n" +
-            "    if (thinkContainer) {\n" +
-            "      var blocks = thinkContainer.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
-            "      if (blocks.length > 0) {\n" +
-            "        var parts = [];\n" +
-            "        for (var bi = 0; bi < blocks.length; bi++) {\n" +
-            "          var t = '';\n" +
-            "          var kids = blocks[bi].childNodes;\n" +
-            "          for (var ki = 0; ki < kids.length; ki++) t += (kids[ki].textContent || '');\n" +
-            "          if (t.trim()) parts.push(t.trim());\n" +
-            "        }\n" +
-            "        thinkText = parts.join('\\n');\n" +
-            "      } else {\n" +
-            "        thinkText = (thinkContainer.textContent || '').trim();\n" +
-            "      }\n" +
-            "    }\n" +
-            "    // 解析用时：查找 \"已思考（用时 N 秒）\" 文本\n" +
-            "    var durationSec = 0;\n" +
-            "    try {\n" +
-            "      var spans = scope.querySelectorAll('span');\n" +
-            "      for (var si = 0; si < spans.length; si++) {\n" +
-            "        var stxt = (spans[si].textContent || '').trim();\n" +
-            "        var m = stxt.match(/已思考[（(]\\s*用时\\s*(\\d+)\\s*秒\\s*[）)]/);\n" +
-            "        if (m) { durationSec = parseInt(m[1], 10) || 0; break; }\n" +
-            "      }\n" +
-            "    } catch(e) {}\n" +
-            "    Android.log('[JS] 思考内容捕获: 长度=' + thinkText.length + ', 用时=' + durationSec + '秒');\n" +
-            "    Android.onDeepSeekThink(__rid, thinkText, durationSec);\n" +
-            "  }\n" +
+"  function sendThinkCallback(lastAiEl) {\n" +
+"    // 提取思考内容：.ds-think-content 内的 p.ds-markdown-paragraph\n" +
+"    // 关键修复：把思考内容/用时的查找限定在当前轮 AI 消息块内\n" +
+"    var scope = lastAiEl;\n" +
+"    while (scope && scope.parentElement &&\n" +
+           !(scope.classList && scope.classList.contains('ds-message'))) {\n" +
+"      scope = scope.parentElement;\n" +
+"    }\n" +
+"    scope = scope || lastAiEl;\n" +
+"    var thinkText = '';\n" +
+"    var thinkContainer = scope.querySelector('.ds-think-content');\n" +
+"    if (thinkContainer) {\n" +
+"      var blocks = thinkContainer.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
+"      if (blocks.length > 0) {\n" +
+"        var parts = [];\n" +
+"        for (var bi = 0; bi < blocks.length; bi++) {\n" +
+"          var t = '';\n" +
+"          var kids = blocks[bi].childNodes;\n" +
+"          for (var ki = 0; ki < kids.length; ki++) t += (kids[ki].textContent || '');\n" +
+"          if (t.trim()) parts.push(t.trim());\n" +
+"        }\n" +
+"        thinkText = parts.join('\\n');\n" +
+"      } else {\n" +
+"        thinkText = (thinkContainer.textContent || '').trim();\n" +
+"      }\n" +
+"    }\n" +
+"    // 解析用时：查找 \"已思考（用时 N 秒）\" 文本\n" +
+"    var durationSec = 0;\n" +
+"    try {\n" +
+"      var spans = scope.querySelectorAll('span');\n" +
+"      for (var si = 0; si < spans.length; si++) {\n" +
+"        var stxt = (spans[si].textContent || '').trim();\n" +
+"        var m = stxt.match(/已思考[（(]\\s*用时\\s*(\\d+)\\s*秒\\s*[）)]/);\n" +
+"        if (m) { durationSec = parseInt(m[1], 10) || 0; break; }\n" +
+"      }\n" +
+"    } catch(e) {}\n" +
+"    Android.log('[JS] 思考内容捕获: 长度=' + thinkText.length + ', 用时=' + durationSec + '秒');\n" +
+"    Android.onDeepSeekThink(__rid, thinkText, durationSec);\n" +
+"  }\n" +
             "\n" +
             "  // 解析 JSON-RPC 并提取内容\n" +
             "  function parseJsonRpc(rawText) {\n" +
