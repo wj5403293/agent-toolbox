@@ -643,9 +643,16 @@
             font-size: 13px;
         }
         .message.server .message-bubble {
+            display: block;
             background: white;
             border: 1px solid #e9edf2;
+            border-top: none;
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
             border-bottom-left-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 0;
         }
         /* 计划完成总结气泡：绿色强调，突出最终结果 */
         .message-bubble.complete {
@@ -838,11 +845,13 @@
         }
         /* 深度思考内容卡片（可折叠） */
         .think-card {
-            margin-top: 8px;
-            margin-bottom: 10px;
-            border-radius: 12px;
+            margin: 8px 0 0 0;
+            border-radius: 12px 12px 0 0;
             background: #f8fafc;
             border: 1px solid #e2e8f0;
+            border-bottom: none;
+            width: 100%;
+            box-sizing: border-box;
             overflow: hidden;
             font-size: 13px;
         }
@@ -887,10 +896,7 @@
             font-size: 12px;
         }
         .think-card-toggle {
-            margin-left: auto;
-            color: #94a3b8;
-            font-size: 12px;
-            transition: transform 0.2s;
+            display: none;
         }
         .think-card.collapsed .think-card-toggle {
             transform: rotate(-90deg);
