@@ -374,23 +374,53 @@ public class DeepSeekChatBridge {
      * 由 JS 桥接调用：DeepSeek 页面尚未出现新消息，但能检测到仍在生成/处理，
      * 用于向客户端发送心跳，避免 HTTP 端误判为"超时"。
      */
-    public void onDeepSeekStatus(String requestId, String statusText) {
+    public void onDeepSeekStatus(String requestId, final String statusText) {
         if (requestId == null) return;
-        StreamCallback cb = callbacksById.get(requestId);
+        final StreamCallback cb = callbacksById.get(requestId);
         if (cb != null) {
-            try { cb.onChunk("[STATUS] " + (statusText == null ? "" : statusText)); } catch (Exception ignored) {}
+            // 关键修复：JSBridge 通过 handler.post 在 UI 线程调用本方法，
+            // 若直接调用 cb.onChunk → writeEventChunk → out.write() 会触发
+            // NetworkOnMainThreadException（Android 默认 StrictMode）。
+            // 因此投递到 worker 线程池执行 SSE 写入。
+            final String status = statusText == null ? "" : statusText;
+            try {
+                executorService.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try { cb.onChunk("[STATUS] " + status); } catch (Exception ignored) {}
+                    }
+                });
+            } catch (Exception ignored) {}
         }
     }
 
     /**
      * 由 JS 桥接调用：深度思考内容捕获（思考过程文本 + 用时）。
-     * observer 在检测到 <hr> 分界后，提取 <hr> 之前的思考内容并调用此方法。
+     * 思考内容在 .ds-think-content 内，由 pollOnce 检测到最终回复出现时触发 sendThinkCallback。
      */
-    public void onDeepSeekThink(String requestId, String thinkText, int durationSec) {
+    public void onDeepSeekThink(String requestId, final String thinkText, final int durationSec) {
         if (requestId == null) return;
-        StreamCallback cb = callbacksById.get(requestId);
+        final StreamCallback cb = callbacksById.get(requestId);
         if (cb != null && thinkText != null && !thinkText.isEmpty()) {
-            try { cb.onThink(thinkText, durationSec); } catch (Exception ignored) {}
+            // 关键修复：JSBridge 在 UI 线程调用本方法，直接调用 cb.onThink 会在
+            // writeEventChunk 中触发 NetworkOnMainThreadException，导致思考内容
+            // SSE 事件无法推送（异常 getMessage() 返回 null，表现为"onThink异常: null"）。
+            // 投递到 worker 线程池后，与 onDone 一样在 worker 线程执行 SSE 写入。
+            try {
+                executorService.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            cb.onThink(thinkText, durationSec);
+                        } catch (Exception e) {
+                            AppLogger.e("DeepSeekChatBridge",
+                                "onThink 回调执行异常: " + e.getClass().getName()
+                                    + " " + (e.getMessage() == null ? "(null)" : e.getMessage())
+                                    + "\n" + android.util.Log.getStackTraceString(e));
+                        }
+                    }
+                });
+            } catch (Exception ignored) {}
         }
     }
 
@@ -976,11 +1006,21 @@ public class DeepSeekChatBridge {
     //  被 JavaScriptBridge 调用：把 JS 侧的事件按 requestId 路由到对应回调
     // ======================================================================
 
-    public void onDeepSeekChunk(String requestId, String chunk) {
+    public void onDeepSeekChunk(String requestId, final String chunk) {
         if (requestId == null) return;
-        StreamCallback cb = callbacksById.get(requestId);
+        final StreamCallback cb = callbacksById.get(requestId);
         if (cb != null) {
-            try { cb.onChunk(chunk); } catch (Exception e) { /* ignore */ }
+            // 关键修复：JSBridge 在 UI 线程调用本方法，cb.onChunk → writeEventChunk
+            // 会在 UI 线程做网络 I/O 触发 NetworkOnMainThreadException。
+            // 投递到 worker 线程池执行，与 onDone 一致。
+            try {
+                executorService.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try { cb.onChunk(chunk); } catch (Exception e) { /* ignore */ }
+                    }
+                });
+            } catch (Exception ignored) {}
         }
     }
 
