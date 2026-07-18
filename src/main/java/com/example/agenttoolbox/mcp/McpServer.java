@@ -1226,8 +1226,13 @@ public class McpServer {
                                             j.put("duration", durationSec);
                                             j.put("round", currentRound);
                                             writeEventChunk(out, "think", j.toString());
+                                            log("[LLM] onThink推送成功");
                                         } catch (Exception e) {
-                                            log("[LLM] onThink异常: " + e.getMessage());
+                                            log("[LLM] onThink异常: "
+                                                + "类型=" + e.getClass().getName()
+                                                + " msg=" + (e.getMessage() == null ? "(null)" : e.getMessage())
+                                                + " out=" + (out == null ? "null" : "非null")
+                                                + " 堆栈=" + android.util.Log.getStackTraceString(e));
                                         }
                                     }
 
