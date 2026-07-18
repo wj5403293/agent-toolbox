@@ -162,6 +162,9 @@ public class MainActivity extends Activity {
 
         appendLog("Agent工具箱 MCP服务端已就绪");
         appendLog("点击\"启动MCP服务\"按钮开始服务");
+
+        // 检查 APP 更新（异步，不影响启动）
+        UpdateChecker.check(this);
     }
     
     /**
