@@ -539,6 +539,8 @@ public class DeepSeekChatBridge {
             "    var out = [];\n" +
             "    for (var bi = 0; bi < blocks.length; bi++) {\n" +
             "      var b = blocks[bi];\n" +
+            "      // 防御：极端情况下 DeepSeek 可能把思考内容并入正文容器，跳过思考段落\n" +
+            "      if (b.closest && b.closest('.ds-think-content')) continue;\n" +
             "      var txt = '';\n" +
             "      var kids = b.childNodes;\n" +
             "      for (var ki = 0; ki < kids.length; ki++) {\n" +
@@ -1103,34 +1105,59 @@ public class DeepSeekChatBridge {
             public void run() {
                 final String fallbackScript =
                     "(function() {\n" +
-                    "  var selectors = [\n" +
-                    "    '.ds-assistant-message-main-content',\n" +
-                    "    '[class*=\"ds-assistant-message\"]',\n" +
-                    "    '[class*=\"assistant-message-main\"]',\n" +
-                    "    '.ds-markdown--block',\n" +
-                    "    '.ds-markdown',\n" +
-                    "    '[class*=\"assistant-message\"]'\n" +
-                    "  ];\n" +
-                    "  function mdText(el) {\n" +
-                    "    if (!el) return '';\n" +
-                    "    var blocks = el.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
-                    "    if (blocks.length === 0) return (el.textContent || el.innerText || '').trim();\n" +
-                    "    var out = [];\n" +
-                    "    for (var bi = 0; bi < blocks.length; bi++) {\n" +
-                    "      var b = blocks[bi]; var t = ''; var ks = b.childNodes;\n" +
-                    "      for (var ki = 0; ki < ks.length; ki++) t += (ks[ki].textContent || '');\n" +
-                    "      if (t.trim()) out.push(t.trim());\n" +
-                    "    }\n" +
-                    "    return out.join('\\n');\n" +
-                    "  }\n" +
-                    "  for (var i = 0; i < selectors.length; i++) {\n" +
-                    "    var els = document.querySelectorAll(selectors[i]);\n" +
-                    "    if (els && els.length > 0) {\n" +
-                    "      var txt = mdText(els[els.length - 1]);\n" +
-                    "      if (txt && txt.length > 5) return txt;\n" +
-                    "    }\n" +
-                    "  }\n" +
-                    "  return '';\n" +
+                "  // 关键修复：严格区分「思考内容」与「最终正文」\n" +
+                "  // 思考内容位于 .ds-think-content 内，正文位于 .ds-assistant-message-main-content 内。\n" +
+                "  // 旧逻辑兜底选择器 '.ds-markdown' 会命中思考容器内部的 markdown，导致「已停止/中断」\n" +
+                "  // 且只见思考、不见正文时，把思考内容误当最终正文返回调用方（表现为思考被当成最终回复）。\n" +
+                "  function isInsideThink(node) {\n" +
+                "    var n = node;\n" +
+                "    while (n && n.nodeType === 1) {\n" +
+                "      if (n.classList && n.classList.contains('ds-think-content')) return true;\n" +
+                "      n = n.parentElement;\n" +
+                "    }\n" +
+                "    return false;\n" +
+                "  }\n" +
+                "  function mdText(el) {\n" +
+                "    if (!el || isInsideThink(el)) return '';\n" +
+                "    var blocks = el.querySelectorAll('p.ds-markdown-paragraph, pre');\n" +
+                "    if (blocks.length === 0) {\n" +
+                "      if (isInsideThink(el)) return '';\n" +
+                "      return (el.textContent || el.innerText || '').trim();\n" +
+                "    }\n" +
+                "    var out = [];\n" +
+                "    for (var bi = 0; bi < blocks.length; bi++) {\n" +
+                "      var b = blocks[bi];\n" +
+                "      if (isInsideThink(b)) continue;\n" +
+                "      var t = ''; var ks = b.childNodes;\n" +
+                "      for (var ki = 0; ki < ks.length; ki++) t += (ks[ki].textContent || '');\n" +
+                "      if (t.trim()) out.push(t.trim());\n" +
+                "    }\n" +
+                "    return out.join('\\n');\n" +
+                "  }\n" +
+                "  // 优先：明确的正文容器\n" +
+                "  var mainEls = document.querySelectorAll('.ds-assistant-message-main-content');\n" +
+                "  for (var m = mainEls.length - 1; m >= 0; m--) {\n" +
+                "    var mt = mdText(mainEls[m]);\n" +
+                "    if (mt && mt.length > 1) return mt;\n" +
+                "  }\n" +
+                "  // 兜底：其他可能承载正文的容器，但【绝不】包含思考容器\n" +
+                "  var fallbackSelectors = [\n" +
+                "    '[class*=\"ds-assistant-message\"]',\n" +
+                "    '[class*=\"assistant-message-main\"]',\n" +
+                "    '.ds-markdown--block'\n" +
+                "  ];\n" +
+                "  for (var i = 0; i < fallbackSelectors.length; i++) {\n" +
+                "    var els = document.querySelectorAll(fallbackSelectors[i]);\n" +
+                "    for (var j = els.length - 1; j >= 0; j--) {\n" +
+                "      var el = els[j];\n" +
+                "      if (isInsideThink(el)) continue;\n" +
+                "      var txt = mdText(el);\n" +
+                "      if (txt && txt.length > 5) return txt;\n" +
+                "    }\n" +
+                "  }\n" +
+                "  // 仍未提取到正文：保持空，上层走「收到回复为空」错误路径，\n" +
+                "  // 绝不把思考内容当正文返回。\n" +
+                "  return '';\n" +
                     "})()";
                 wb.evaluateJavascript(fallbackScript, new ValueCallback<String>() {
                     @Override
