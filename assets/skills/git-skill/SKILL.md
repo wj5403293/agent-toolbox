@@ -87,3 +87,41 @@ git -C /sdcard/Download/agent-toolbox reset --mixed <commit>
 
 ## 技能工具
 本技能不提供直接调用的工具，而是作为知识库供 AI 在执行 Git 相关任务时参考。
+
+### 5. 克隆失败：目录已存在或残留 .git
+克隆前应先删除目标目录及可能存在的 .git 目录：
+```bash
+rm -rf /sdcard/Download/agent-toolbox /sdcard/Download/agent-toolbox.git
+```
+若出现 `FileExistsError`，说明有残留 .git 文件夹，同样清理后重试。
+
+### 6. Git 配置命令参数错误
+使用 `git config --global --add safe.directory` 时可能报错 "wrong number of arguments"，应改用：
+```bash
+git config --global safe.directory /path/to/repo
+```
+或使用 `-c safe.directory` 临时指定。
+
+### 7. commit 时遇到锁文件（HEAD.lock / main.lock）
+若执行 `git commit` 提示无法创建锁文件，说明之前的 Git 进程未正常结束。删除所有 .lock 文件即可：
+```bash
+find .git -name '*.lock' -delete
+```
+然后重新 commit。
+
+### 8. 内嵌 Git 不支持 -C 参数
+当使用内嵌静态 Git 二进制（或 dulwich 回退模式）时，`-C` 子命令可能不被支持。应改为先 `cd` 到仓库目录再执行：
+```bash
+cd /sdcard/Download/agent-toolbox
+git reset --hard <commit>
+```
+
+### 9. 符号链接导致 reset 失败（Permission denied）
+在 Android 文件系统上，某些符号链接操作会因权限不足失败。使用 `-c core.symlinks=false` 可绕过：
+```bash
+git -C /sdcard/Download/agent-toolbox -c core.symlinks=false reset --hard <commit>
+```
+
+### 10. 分段错误（Segmentation fault）
+内嵌 Git 二进制在某些设备上可能触发段错误（退出码 139），此时会自动回退到 dulwich 纯 Python 实现。若问题持续，建议改用 Python 脚本操作（如 dulwich 或直接下载 ZIP 解压）。
+
