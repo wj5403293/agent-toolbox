@@ -183,7 +183,7 @@ from: builtin
 | action | 必填字段 | 说明 |
 |--------|----------|------|
 | `complete_task` | `task_id` | 标记任务完成（别名 `mark_done` 同样生效） |
-| `mark_failed` | `task_id`, `reason` | 标记任务失败，可在 MAX_RETRY 内重试 |
+| `mark_failed` | `task_id`, `reason` | 标记任务失败，可在 MAX_RETRY（3 次）内自动重试。**重试耗尽变为永久失败时，系统会让你用 `ask` 工具向用户提问，由用户决定方案（重试/跳过/替换计划/终止），不要替用户决策** |
 | `skip_task` | `task_id`, `reason` | 标记任务**跳过**（有意识地不执行，区别于失败，不重试）。下游依赖任务仍可继续执行（跳过视为依赖已满足）。不填 `task_id` 则跳过当前活跃任务 |
 | `update_plan` | `plan` | 替换整个计划 |
 

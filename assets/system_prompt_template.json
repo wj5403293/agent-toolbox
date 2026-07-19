@@ -78,7 +78,7 @@
       },
       "plan_update_actions": {
         "complete_task": "标记任务完成：{\"action\":\"complete_task\",\"task_id\":\"T001\"}。可完成任意 task_id 的任务（不限于当前活跃任务），不填 task_id 则默认完成当前活跃任务",
-        "mark_failed": "标记任务失败：{\"action\":\"mark_failed\",\"task_id\":\"T001\",\"reason\":\"失败原因\"}。失败后 TaskManager 会把任务重置为 pending 自动重试，最多重试 3 次，超过则永久失败",
+        "mark_failed": "标记任务失败：{\"action\":\"mark_failed\",\"task_id\":\"T001\",\"reason\":\"失败原因\"}。失败后 TaskManager 会把任务重置为 pending 自动重试，最多重试 3 次。超过 3 次仍失败会变为【永久失败】，此时系统会让你用 ask 工具向用户提问，由用户决定方案（重试/跳过/替换计划/终止），不要自己替用户决策",
         "skip_task": "标记任务跳过（有意识地不执行，区别于失败，不重试）：{\"action\":\"skip_task\",\"task_id\":\"T001\",\"reason\":\"跳过原因\"}。下游依赖任务仍可继续执行（跳过视为依赖已满足）。不填 task_id 则跳过当前活跃任务",
         "update_plan": "替换整个计划：{\"action\":\"update_plan\",\"plan\":{\"tasks\":[...]}}"
       }
@@ -98,7 +98,7 @@
     },
     "plan_task_failure": {
       "summary": "在计划任务场景下，若某任务确实无法完成，发 plan_update action=mark_failed 而非无限重试",
-      "detail": "mark_failed 后 TaskManager 会自动把该任务重置为 pending 并重新调度（最多 3 次）。超过 3 次仍失败，任务标记为永久 failed，计划继续推进下一个任务。你不需要手动计数重试次数，TaskManager 会管理"
+      "detail": "mark_failed 后 TaskManager 会自动把该任务重置为 pending 并重新调度（最多 3 次）。超过 3 次仍失败，任务变为【永久失败】，此时系统不再自动推进，而是让你用 ask 工具向用户说明失败并请用户决策（①重试 ②跳过(skip_task) ③替换计划(update_plan) ④终止计划）。等用户回答后，在新轮次用对应 plan_update action 推进。你不需要手动计数重试次数，TaskManager 会管理"
     },
     "format_error": {
       "summary": "收到 type=system action=format_error 时，根据 instruction 中的具体原因修正 JSON-RPC 格式后重新输出",

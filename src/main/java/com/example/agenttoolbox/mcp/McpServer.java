@@ -1432,6 +1432,23 @@ public class McpServer {
                                                 String reason = planUpdate.optString("reason", "未知错误");
                                                 if (!taskId.isEmpty()) {
                                                     tm.markTaskFailed(cachedSession.planState, taskId, reason);
+                                                    // 判断是否已变为“永久失败”（重试耗尽）
+                                                    Task ft = null;
+                                                    for (Task t : cachedSession.planState.tasks) {
+                                                        if (t.taskId.equals(taskId)) { ft = t; break; }
+                                                    }
+                                                    if (ft != null && ft.status == Task.Status.FAILED && !ft.canRetry()) {
+                                                        // 自动重试已耗尽：把决策权交还用户，引导 LLM 用 ask 工具询问方案
+                                                        writePlanEvent(out, cachedSession.planState, "progress");
+                                                        String askMsg = buildPlanMessage("ask_user", ft, cachedSession.planState, conversationId,
+                                                            "任务 " + taskId + " 已永久失败（已重试 " + Task.MAX_RETRY + " 次均失败）：" + reason
+                                                            + "。请调用 ask 工具向用户说明失败原因，并让用户在以下方案中选择："
+                                                            + "① 重试该任务 ② 跳过该任务(skip_task) ③ 替换计划(update_plan) ④ 终止计划。"
+                                                            + "等待用户回答后，在新轮次用对应 plan_update action 推进，不要提前 plan_update。");
+                                                        if (askMsg != null) currentMessage = askMsg;
+                                                        log("[PLAN] 任务 " + taskId + " 永久失败，转入 ask 用户决策");
+                                                        continue;
+                                                    }
                                                 }
                                                 break;
                                             }
